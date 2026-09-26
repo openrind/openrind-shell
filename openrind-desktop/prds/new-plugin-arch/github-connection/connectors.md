@@ -890,7 +890,7 @@ For agents running inside an OpenCode session to manage the catalog without leav
 
 ```
 openrind-desktop connector list
-openrind-desktop connector add github --repo different-ai/openwork-plugins [--ref main]
+openrind-desktop connector add github --repo openrind/openrind-shell-plugins [--ref main]
 openrind-desktop connector remove <source-id>
 openrind-desktop connector sync <source-id>
 
@@ -1025,7 +1025,7 @@ No existing data to migrate — these are all new tables. The existing `/v1/orgs
 
 ### Integration
 
-- **Real GitHub**: a test org + throwaway repo under `different-ai/openwork-test-plugins` with fixture plugins. CI authenticates with a PAT; runs a full ingest + install + uninstall against a temp worktree. Skipped in local unless `OPENRIND_DESKTOP_TEST_GITHUB_PAT` is set.
+- **Real GitHub**: a test org + throwaway repo under `openrind/openrind-shell-test-plugins` with fixture plugins. CI authenticates with a PAT; runs a full ingest + install + uninstall against a temp worktree. Skipped in local unless `OPENRIND_DESKTOP_TEST_GITHUB_PAT` is set.
 - **Real Openrind Desktop server**: spins up `packaging/docker/dev-up.sh`, provisions a workspace, runs materialization, diffs `.opencode/` against expectations.
 
 ### End-to-end

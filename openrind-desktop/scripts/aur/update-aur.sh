@@ -31,8 +31,8 @@ fi
 VERSION="${TAG#v}"
 ASSET_NAME_AMD64="${AUR_ASSET_NAME:-openrind-desktop-desktop-linux-amd64.deb}"
 ASSET_NAME_ARM64="openrind-desktop-desktop-linux-arm64.deb"
-ASSET_URL_AMD64="https://github.com/different-ai/openwork/releases/download/${TAG}/${ASSET_NAME_AMD64}"
-ASSET_URL_ARM64="https://github.com/different-ai/openwork/releases/download/${TAG}/${ASSET_NAME_ARM64}"
+ASSET_URL_AMD64="https://github.com/openrind/openrind-shell/releases/download/${TAG}/${ASSET_NAME_AMD64}"
+ASSET_URL_ARM64="https://github.com/openrind/openrind-shell/releases/download/${TAG}/${ASSET_NAME_ARM64}"
 
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT

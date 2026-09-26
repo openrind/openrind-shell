@@ -9,7 +9,7 @@ concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
   stats:
-    if: github.repository == 'different-ai/openwork'
+    if: github.repository == 'openrind/openrind-shell'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: write
@@ -31,7 +31,7 @@ jobs:
           POSTHOG_LEGACY_EVENT: download
           POSTHOG_V2_EVENT: release_asset_snapshot
           POSTHOG_DISTINCT_ID: openrind-desktop-download
-          GITHUB_REPO: different-ai/openwork
+          GITHUB_REPO: openrind/openrind-shell
         run: node scripts/stats.mjs
 
       - name: Commit stats

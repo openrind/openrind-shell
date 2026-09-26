@@ -51,7 +51,7 @@ export type CreateWorkspaceSharedPanelProps = {
   openingWorkerId: string | null;
   workerStatusMeta: (status: string) => WorkerStatusMeta;
   workerSecondaryLine: (worker: DenWorkerSummary) => string;
-  onOpenrindDesktoper: (worker: DenWorkerSummary) => void;
+  onOpenWorker: (worker: DenWorkerSummary) => void;
   onOpenCloudSignIn: () => void;
   onRefreshWorkers: () => void;
   onOpenCloudDashboard: () => void;
@@ -219,7 +219,7 @@ export function CreateWorkspaceSharedPanel(
                         ? "This workspace is not ready to connect yet."
                         : undefined
                     }
-                    onClick={() => props.onOpenrindDesktoper(worker)}
+                    onClick={() => props.onOpenWorker(worker)}
                   >
                     {isConnecting ? (
                       <span className="inline-flex items-center gap-2">

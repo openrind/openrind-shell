@@ -155,7 +155,7 @@ describe("workspace session read APIs", () => {
       opencodeBaseUrl: `http://127.0.0.1:${mock.server.port}`,
     });
 
-    const base = `http://127.0.0.1:${openrind-desktop.server.port}`;
+    const base = `http://127.0.0.1:${openrindDesktop.server.port}`;
 
     const listResponse = await fetch(`${base}/workspace/ws_1/sessions?roots=true&limit=1&search=host&start=10`, {
       headers: auth(openrindDesktop.token),
@@ -224,7 +224,7 @@ describe("workspace session read APIs", () => {
       opencodeBaseUrl: `http://127.0.0.1:${mock.server.port}`,
     });
 
-    const response = await fetch(`http://127.0.0.1:${openrind-desktop.server.port}/workspace/ws_1/sessions/ses_missing/snapshot`, {
+    const response = await fetch(`http://127.0.0.1:${openrindDesktop.server.port}/workspace/ws_1/sessions/ses_missing/snapshot`, {
       headers: auth(openrindDesktop.token),
     });
     expect(response.status).toBe(404);
@@ -243,7 +243,7 @@ describe("workspace session read APIs", () => {
       opencodeBaseUrl: `http://127.0.0.1:${mock.server.port}`,
     });
 
-    const response = await fetch(`http://127.0.0.1:${openrind-desktop.server.port}/workspace/ws_1/sessions`, {
+    const response = await fetch(`http://127.0.0.1:${openrindDesktop.server.port}/workspace/ws_1/sessions`, {
       headers: auth(openrindDesktop.token),
     });
     expect(response.status).toBe(502);

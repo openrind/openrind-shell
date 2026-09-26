@@ -147,7 +147,7 @@ jobs:
           config.plugins.updater = {
             ...(config.plugins.updater || {}),
             endpoints: [
-              "https://github.com/different-ai/openwork/releases/download/alpha-macos-latest/latest.json",
+              "https://github.com/openrind/openrind-shell/releases/download/alpha-macos-latest/latest.json",
             ],
           };
 

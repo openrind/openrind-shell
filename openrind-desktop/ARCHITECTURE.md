@@ -87,8 +87,8 @@ If an agent needs one of the server-owned behaviors above and only a Tauri path 
 
 Openrind Desktop desktop ships through two release channels:
 
-- **Stable** (default, all platforms): versioned builds produced by the `Release App` workflow. Each tag `vX.Y.Z` publishes signed, notarized Tauri bundles plus a `latest.json` updater manifest at `https://github.com/different-ai/openwork/releases/latest/download/latest.json`; when Electron publishing is enabled, the same release also carries signed, notarized Electron macOS assets plus `latest-mac.yml` at `https://github.com/different-ai/openwork/releases/latest/download/latest-mac.yml`.
-- **Alpha** (macOS arm64 only, rolling): every merge to `dev` publishes signed, notarized Tauri and Electron builds to the rolling GitHub release tagged `alpha-macos-latest`. The Tauri alpha updater manifest lives at `https://github.com/different-ai/openwork/releases/download/alpha-macos-latest/latest.json`; Electron alpha assets include `latest-mac.yml` at `https://github.com/different-ai/openwork/releases/download/alpha-macos-latest/latest-mac.yml` on the same release.
+- **Stable** (default, all platforms): versioned builds produced by the `Release App` workflow. Each tag `vX.Y.Z` publishes signed, notarized Tauri bundles plus a `latest.json` updater manifest at `https://github.com/openrind/openrind-shell/releases/latest/download/latest.json`; when Electron publishing is enabled, the same release also carries signed, notarized Electron macOS assets plus `latest-mac.yml` at `https://github.com/openrind/openrind-shell/releases/latest/download/latest-mac.yml`.
+- **Alpha** (macOS arm64 only, rolling): every merge to `dev` publishes signed, notarized Tauri and Electron builds to the rolling GitHub release tagged `alpha-macos-latest`. The Tauri alpha updater manifest lives at `https://github.com/openrind/openrind-shell/releases/download/alpha-macos-latest/latest.json`; Electron alpha assets include `latest-mac.yml` at `https://github.com/openrind/openrind-shell/releases/download/alpha-macos-latest/latest-mac.yml` on the same release.
 
 Guidelines:
 

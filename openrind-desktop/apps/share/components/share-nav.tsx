@@ -36,7 +36,7 @@ export default function ShareNav({ stars = "" }: { stars?: string }) {
       <div className="nav-actions">
         <a
           className="button-secondary share-github-button"
-          href="https://github.com/different-ai/openwork"
+          href="https://github.com/openrind/openrind-shell"
           target="_blank"
           rel="noreferrer"
           aria-label="Openrind Desktop GitHub stars"

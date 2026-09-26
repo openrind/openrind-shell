@@ -608,7 +608,7 @@ function buildCapabilities(config: ServerConfig): Capabilities {
       skills: {
         read: true,
         install: writeEnabled,
-        repo: { owner: "different-ai", name: "openrind-desktop-hub", ref: "main" },
+        repo: { owner: "openrind", name: "openrind-desktop-hub", ref: "main" },
       },
     },
     plugins: { read: true, write: writeEnabled },
@@ -2382,7 +2382,7 @@ function createRoutes(
     const repo = ctx.url.searchParams.get("repo")?.trim();
     const ref = ctx.url.searchParams.get("ref")?.trim();
     const items = await listHubSkills({
-      owner: owner || "different-ai",
+      owner: owner || "openrind",
       repo: repo || "openrind-desktop-hub",
       ref: ref || "main",
     });

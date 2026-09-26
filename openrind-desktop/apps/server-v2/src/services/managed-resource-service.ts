@@ -10,7 +10,7 @@ import type { WorkspaceFileService } from "./workspace-file-service.js";
 import { RouteError } from "../http.js";
 
 const DEFAULT_HUB_REPO = {
-  owner: "different-ai",
+  owner: "openrind",
   repo: "openrind-desktop-hub",
   ref: "main",
 } as const;

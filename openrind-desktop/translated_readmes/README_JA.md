@@ -13,7 +13,7 @@
 - シェアリング・イズ・ケアリング: localhostでソロ作業を始め、必要に応じてリモート共有を明示的にオプトインできます。
 
 <p align="center">
-  <img src="../app-demo.gif" alt="Openrind Desktop デモ" width="800" />
+  <img src="../docs/images/claude.gif" alt="Openrind Desktop Claude Code デモ" width="800" />
 </p>
 
 Openrind Desktopは、エージェントワークフローを再現可能なプロダクト化されたプロセスとして簡単にリリースできるように設計されています。
@@ -26,7 +26,7 @@ Openrind Desktopは、エージェントワークフローを再現可能なプ�
 
 ## クイックスタート
 
-デスクトップアプリを[openrind-desktoplabs.com/download](https://openrind-desktoplabs.com/download)からダウンロードするか、最新の[GitHubリリース](https://github.com/different-ai/openwork/releases)を取得するか、以下の手順でソースからインストールしてください。
+デスクトップアプリを[openrind-desktoplabs.com/download](https://openrind-desktoplabs.com/download)からダウンロードするか、最新の[GitHubリリース](https://github.com/openrind/openrind-shell/releases)を取得するか、以下の手順でソースからインストールしてください。
 
 - macOSおよびLinux向けのダウンロードが直接利用可能です。
 - Windowsへのアクセスは現在、[openrind-desktoplabs.com/pricing#windows-support](https://openrind-desktoplabs.com/pricing#windows-support)の有料サポートプランで提供されています。
@@ -57,13 +57,21 @@ Openrind Desktopは以下を目指して設計されています:
   - インストール済みの `.opencode/skills` フォルダを一覧表示
   - ローカルのスキルフォルダを `.opencode/skills/<skill-name>` にインポート
 
-## スキルマネージャー
+## OpenHands & OpenClaw エージェントサンドボックス
 
-<img width="1292" height="932" alt="image" src="https://github.com/user-attachments/assets/b500c1c6-a218-42ce-8a11-52787f5642b6" />
+<p align="center">
+  <img src="../docs/images/openhand.png" alt="Openrind Desktop OpenHands サポート" width="800" />
+</p>
 
-## ローカルコンピュータまたはサーバーで動作
+<p align="center">
+  <img src="../docs/images/openclaw.png" alt="Openrind Desktop OpenClaw サポート" width="800" />
+</p>
 
-<img width="1292" height="932" alt="Screenshot 2026-01-13 at 7 05 16 PM" src="https://github.com/user-attachments/assets/9c864390-de69-48f2-82c1-93b328dd60c3" />
+## サンドボックス & ワークスペース設定
+
+<p align="center">
+  <img src="../docs/images/settings-sandbox.png" alt="Openrind Desktop サンドボックス設定" width="800" />
+</p>
 
 ## クイックスタート
 
@@ -227,6 +235,10 @@ WEBKIT_DISABLE_COMPOSITING_MODE=1 openrind-desktop
 ## チーム・企業向け
 
 組織でのOpenrind Desktop利用に興味がありますか？ぜひお聞かせください — [ben@openrindlabs.com](mailto:ben@openrindlabs.com) までユースケースについてご連絡ください。
+
+## 謝辞
+
+Openrind Desktopは、Different AIによるオープンソースプロジェクト[OpenWork](https://github.com/different-ai/openwork)に基づいています。
 
 ## ライセンス
 

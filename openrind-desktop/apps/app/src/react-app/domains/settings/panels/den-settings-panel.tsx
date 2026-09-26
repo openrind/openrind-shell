@@ -937,7 +937,7 @@ export function DenSettingsPanel(props: DenSettingsPanelProps) {
     clearSignedInState(tr("den.status_signed_out"));
   }, [authBusy, authToken, clearSignedInState, client, tr]);
 
-  const handleOpenrindDesktoper = useCallback(
+  const handleOpenWorker = useCallback(
     async (workerId: string, workerName: string) => {
       const orgId = activeOrgId.trim();
       if (!orgId) {
@@ -1718,7 +1718,7 @@ export function DenSettingsPanel(props: DenSettingsPanelProps) {
                     <Button
                       variant="secondary"
                       className="h-8 shrink-0 px-4 text-xs"
-                      onClick={() => void handleOpenrindDesktoper(worker.workerId, worker.workerName)}
+                      onClick={() => void handleOpenWorker(worker.workerId, worker.workerName)}
                       disabled={openingWorkerId !== null || !status.canOpen}
                       title={!status.canOpen ? tr("den.worker_not_ready_title") : undefined}
                     >

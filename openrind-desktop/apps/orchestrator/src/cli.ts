@@ -1899,7 +1899,7 @@ function resolveSidecarBaseUrl(
     readFlag(flags, "sidecar-base-url") ??
     process.env.OPENRIND_DESKTOP_SIDECAR_BASE_URL;
   if (override && override.trim()) return override.trim();
-  return `https://github.com/different-ai/openwork/releases/download/openrind-desktop-orchestrator-v${cliVersion}`;
+  return `https://github.com/openrind/openrind-shell/releases/download/openrind-desktop-orchestrator-v${cliVersion}`;
 }
 
 function resolveSidecarManifestUrl(
@@ -4305,7 +4305,7 @@ async function writeSandboxEntrypoint(options: {
     .join(" ");
 
   const openrindDesktopCors = options.openrindDesktop.corsOrigins.length
-    ? `--cors ${shQuote(options.openrind-desktop.corsOrigins.join(","))}`
+    ? `--cors ${shQuote(options.openrindDesktop.corsOrigins.join(","))}`
     : "";
 
   const requiredSecretEnv = [
@@ -4380,12 +4380,12 @@ async function writeSandboxEntrypoint(options: {
     options.openrindDesktop.opencodeRouterEnabled ? "opencodeRouter_pid=$!" : "",
     `exec ${shQuote(openrindDesktopBin)} --host 0.0.0.0 --port ${shQuote(String(SANDBOX_INTERNAL_OPENRIND_DESKTOP_PORT))}` +
       ` --workspace ${shQuote(workspaceDir)}` +
-      ` --approval ${shQuote(options.openrind-desktop.approvalMode)}` +
-      ` --approval-timeout ${shQuote(String(options.openrind-desktop.approvalTimeoutMs))}` +
+      ` --approval ${shQuote(options.openrindDesktop.approvalMode)}` +
+      ` --approval-timeout ${shQuote(String(options.openrindDesktop.approvalTimeoutMs))}` +
       (options.openrindDesktop.readOnly ? " --read-only" : "") +
       ` --opencode-base-url ${shQuote(`http://127.0.0.1:${SANDBOX_INTERNAL_OPENCODE_PORT}`)}` +
       ` --opencode-directory ${shQuote(workspaceDir)}` +
-      ` --log-format ${shQuote(options.openrind-desktop.logFormat)}` +
+      ` --log-format ${shQuote(options.openrindDesktop.logFormat)}` +
       (options.openrindDesktop.opencodeRouterEnabled
         ? ` --opencode-router-health-port ${shQuote(String(SANDBOX_INTERNAL_OPENCODE_ROUTER_HEALTH_PORT))}`
         : "") +
@@ -4398,8 +4398,8 @@ async function writeSandboxEntrypoint(options: {
 }
 
 async function startDockerSandbox(options: {
-  image: string;
   dockerCommand: string;
+  image: string;
   containerName: string;
   workspace: string;
   persistDir: string;
@@ -4468,7 +4468,7 @@ async function startDockerSandbox(options: {
     "--name",
     options.containerName,
     "-p",
-    `127.0.0.1:${options.ports.openrind-desktop}:${SANDBOX_INTERNAL_OPENRIND_DESKTOP_PORT}`,
+    `127.0.0.1:${options.ports.openrindDesktop}:${SANDBOX_INTERNAL_OPENRIND_DESKTOP_PORT}`,
     "-v",
     `${options.workspace}:/workspace`,
     "-v",
@@ -4651,7 +4651,7 @@ async function startAppleContainerSandbox(options: {
     "--name",
     options.containerName,
     "-p",
-    `127.0.0.1:${options.ports.openrind-desktop}:${SANDBOX_INTERNAL_OPENRIND_DESKTOP_PORT}`,
+    `127.0.0.1:${options.ports.openrindDesktop}:${SANDBOX_INTERNAL_OPENRIND_DESKTOP_PORT}`,
     "-v",
     `${options.workspace}:/workspace`,
     "-v",
@@ -4882,7 +4882,7 @@ async function startOpenShellSandbox(options: {
     "--workspace-tarball",
     workspaceTarPath,
     "--port-forward",
-    `127.0.0.1:${options.ports.openrind-desktop}:${SANDBOX_INTERNAL_OPENRIND_DESKTOP_PORT}`,
+    `127.0.0.1:${options.ports.openrindDesktop}:${SANDBOX_INTERNAL_OPENRIND_DESKTOP_PORT}`,
     "--",
     "sh",
     entrypointWslPath,
@@ -6994,9 +6994,9 @@ async function runStatus(args: ParsedArgs) {
         error?: string;
       };
       console.log(
-        `Openrind Desktop server: ${openrind-desktop.ok ? "ok" : "error"} (${openrind-desktop.url})`,
+        `Openrind Desktop server: ${openrindDesktop.ok ? "ok" : "error"} (${openrindDesktop.url})`,
       );
-      if (openrindDesktop.error) console.log(`  ${openrind-desktop.error}`);
+      if (openrindDesktop.error) console.log(`  ${openrindDesktop.error}`);
     }
     if (status.opencode) {
       const opencode = status.opencode as {
@@ -8825,8 +8825,8 @@ async function runStart(args: ParsedArgs) {
       if (payload.opencode.username && payload.opencode.password) {
         console.log("OpenCode auth: managed credentials configured (withheld from stdout)");
       }
-      console.log(`Openrind Desktop server: ${payload.openrind-desktop.baseUrl}`);
-      console.log(`Openrind Desktop connect URL: ${payload.openrind-desktop.connectUrl}`);
+      console.log(`Openrind Desktop server: ${payload.openrindDesktop.baseUrl}`);
+      console.log(`Openrind Desktop connect URL: ${payload.openrindDesktop.connectUrl}`);
       console.log("Openrind Desktop collaborator token: issued (withheld from stdout)");
       console.log("  Routine remote access for shared workers.");
       if (payload.openrindDesktop.ownerToken) {

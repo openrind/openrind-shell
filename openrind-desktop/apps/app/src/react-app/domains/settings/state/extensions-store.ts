@@ -60,7 +60,7 @@ import type { OpenrindDesktopServerStore } from "../../connections/openrind-desk
 
 const OPENCODE_SKILL_NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const DEFAULT_HUB_REPO: HubSkillRepo = {
-  owner: "different-ai",
+  owner: "openrind",
   repo: "openrind-desktop-hub",
   ref: "main",
 };

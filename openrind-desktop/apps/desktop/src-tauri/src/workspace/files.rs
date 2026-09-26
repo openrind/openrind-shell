@@ -182,7 +182,7 @@ Specific User Requests
 }
 
 const ENTERPRISE_ARCHIVE_URL: &str =
-    "https://github.com/different-ai/openwork-enterprise/archive/refs/heads/main.zip";
+    "https://github.com/openrind/openrind-shell/archive/refs/heads/main.zip";
 const ENTERPRISE_SEED_MARKER: &str = ".openrind-desktop-enterprise-creators";
 static ENTERPRISE_SEED_IN_FLIGHT: LazyLock<Mutex<HashSet<String>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
@@ -535,7 +535,8 @@ pub fn ensure_workspace_files(workspace_path: &str, preset: &str) -> Result<(), 
 
     let openrind_desktop_path = root.join(".opencode").join("openrind-desktop.json");
     if !openrind_desktop_path.exists() {
-        let openrind_desktop = WorkspaceOpenrindDesktopConfig::new(workspace_path, preset, now_ms());
+        let openrind_desktop =
+            WorkspaceOpenrindDesktopConfig::new(workspace_path, preset, now_ms());
 
         fs::create_dir_all(openrind_desktop_path.parent().unwrap())
             .map_err(|e| format!("Failed to create {}: {e}", openrind_desktop_path.display()))?;

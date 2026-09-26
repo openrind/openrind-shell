@@ -14,7 +14,7 @@ function normalizeArch(arch) {
 function parseArgs(argv) {
   const options = {
     tag: process.env.RELEASE_TAG || "",
-    repo: process.env.GITHUB_REPOSITORY || "different-ai/openwork",
+    repo: process.env.GITHUB_REPOSITORY || "openrind/openrind-shell",
     output: "latest.json",
     version: process.env.RELEASE_VERSION || "",
   };

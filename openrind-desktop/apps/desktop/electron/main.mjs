@@ -2965,7 +2965,7 @@ function buildApplicationMenu() {
       {
         label: "Openrind Desktop Documentation",
         click: () => {
-          void openExternalSafe("https://github.com/different-ai/openwork");
+          void openExternalSafe("https://github.com/openrind/openrind-shell");
         },
       },
       ...(isMac

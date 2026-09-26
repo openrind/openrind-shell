@@ -183,8 +183,8 @@ async function main() {
   console.log("");
   console.log(`[cut-release] pushed ${tag}.`);
   console.log(`[cut-release] watch the workflow:`);
-  console.log(`    gh run list --repo different-ai/openwork --workflow "Release App" --limit 3`);
-  console.log(`    gh run watch --repo different-ai/openwork`);
+  console.log(`    gh run list --repo openrind/openrind-shell --workflow "Release App" --limit 3`);
+  console.log(`    gh run watch --repo openrind/openrind-shell`);
   console.log("");
   console.log(`[cut-release] once the workflow finishes, run:`);
   console.log(`    node scripts/migration/02-validate-migration.mjs --tag ${tag}`);

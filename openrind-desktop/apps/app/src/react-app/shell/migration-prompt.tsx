@@ -46,13 +46,13 @@ function readBuildTimeConfig(): MigrationConfig | null {
   const isDevForced = env.VITE_OPENRIND_DESKTOP_FORCE_MIGRATION_PROMPT === "1";
   if (!isMigrationRelease && !isDevForced) return null;
   return {
-    macUrl: env.VITE_OPENRIND_DESKTOP_MIGRATION_MAC_URL ?? (isDevForced ? "https://github.com/different-ai/openwork/releases/latest" : undefined),
+    macUrl: env.VITE_OPENRIND_DESKTOP_MIGRATION_MAC_URL ?? (isDevForced ? "https://github.com/openrind/openrind-shell/releases/latest" : undefined),
     macArm64Url: env.VITE_OPENRIND_DESKTOP_MIGRATION_MAC_ARM64_URL,
     macX64Url: env.VITE_OPENRIND_DESKTOP_MIGRATION_MAC_X64_URL,
     macSha256: env.VITE_OPENRIND_DESKTOP_MIGRATION_MAC_SHA256,
-    windowsUrl: env.VITE_OPENRIND_DESKTOP_MIGRATION_WINDOWS_URL ?? (isDevForced ? "https://github.com/different-ai/openwork/releases/latest" : undefined),
+    windowsUrl: env.VITE_OPENRIND_DESKTOP_MIGRATION_WINDOWS_URL ?? (isDevForced ? "https://github.com/openrind/openrind-shell/releases/latest" : undefined),
     windowsX64Url: env.VITE_OPENRIND_DESKTOP_MIGRATION_WINDOWS_X64_URL,
-    linuxUrl: env.VITE_OPENRIND_DESKTOP_MIGRATION_LINUX_URL ?? (isDevForced ? "https://github.com/different-ai/openwork/releases/latest" : undefined),
+    linuxUrl: env.VITE_OPENRIND_DESKTOP_MIGRATION_LINUX_URL ?? (isDevForced ? "https://github.com/openrind/openrind-shell/releases/latest" : undefined),
     linuxArm64Url: env.VITE_OPENRIND_DESKTOP_MIGRATION_LINUX_ARM64_URL,
     linuxX64Url: env.VITE_OPENRIND_DESKTOP_MIGRATION_LINUX_X64_URL,
   };

@@ -377,7 +377,7 @@ export function CreateWorkspaceModal(props: CreateWorkspaceModalProps) {
     );
   };
 
-  const handleOpenrindDesktoper = async (worker: DenWorkerSummary) => {
+  const handleOpenWorker = async (worker: DenWorkerSummary) => {
     if (!props.onConfirmRemote) return;
     const orgId = activeOrgId.trim();
     if (!orgId) {
@@ -663,7 +663,7 @@ export function CreateWorkspaceModal(props: CreateWorkspaceModalProps) {
           openingWorkerId={openingWorkerId}
           workerStatusMeta={(status) => workerStatusMeta(status, translate)}
           workerSecondaryLine={(worker) => workerSecondaryLine(worker, translate)}
-          onOpenrindDesktoper={(worker) => void handleOpenrindDesktoper(worker)}
+          onOpenWorker={(worker) => void handleOpenWorker(worker)}
           onOpenCloudSignIn={openCloudSignIn}
           onRefreshWorkers={() => void refreshWorkers()}
           onOpenCloudDashboard={openCloudDashboard}

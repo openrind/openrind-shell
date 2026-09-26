@@ -59,7 +59,7 @@ function resolveFallbackBaseUrl(version) {
   if (override) {
     return override.replace(/\/$/, "")
   }
-  return `https://github.com/different-ai/openwork/releases/download/openrind-desktop-orchestrator-v${version}`
+  return `https://github.com/openrind/openrind-shell/releases/download/openrind-desktop-orchestrator-v${version}`
 }
 
 async function downloadFallbackBinary() {

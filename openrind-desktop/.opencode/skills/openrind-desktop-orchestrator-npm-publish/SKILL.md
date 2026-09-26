@@ -29,7 +29,7 @@ Manual recovery path (sidecars + npm) below.
 ```bash
 pnpm --filter openrind-desktop-orchestrator build:sidecars
 gh release create openrind-desktop-orchestrator-vX.Y.Z packages/orchestrator/dist/sidecars/* \
-  --repo different-ai/openwork \
+  --repo openrind/openrind-shell \
   --title "openrind-desktop-orchestrator vX.Y.Z sidecars" \
   --notes "Sidecar binaries and manifest for openrind-desktop-orchestrator vX.Y.Z"
 ```

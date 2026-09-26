@@ -396,7 +396,7 @@ export function SkillsView(props: SkillsViewProps) {
   );
 
   const hasDefaultHubRepo = useMemo(
-    () => hubRepos.some((repo) => `${repo.owner}/${repo.repo}@${repo.ref}` === "different-ai/openwork-hub@main"),
+    () => hubRepos.some((repo) => `${repo.owner}/${repo.repo}@${repo.ref}` === "openrind/openrind-desktop-hub@main"),
     [hubRepos],
   );
 
@@ -1030,7 +1030,7 @@ export function SkillsView(props: SkillsViewProps) {
               <button
                 type="button"
                 onClick={() => {
-                  void Promise.resolve(extensions.addHubRepo({ owner: "different-ai", repo: "openrind-desktop-hub", ref: "main" })).then(() => {
+                  void Promise.resolve(extensions.addHubRepo({ owner: "openrind", repo: "openrind-desktop-hub", ref: "main" })).then(() => {
                     void extensions.refreshHubSkills({ force: true });
                   });
                 }}
@@ -1382,7 +1382,7 @@ export function SkillsView(props: SkillsViewProps) {
                     type="text"
                     value={customRepoOwner}
                     onChange={(event) => setCustomRepoOwner(event.currentTarget.value)}
-                    placeholder="different-ai"
+                    placeholder="openrind"
                     className="w-full rounded-lg border border-dls-border bg-dls-hover px-3 py-2 text-xs font-mono text-dls-text focus:outline-none"
                     spellCheck={false}
                   />

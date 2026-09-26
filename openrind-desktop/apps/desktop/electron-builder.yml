@@ -29,8 +29,8 @@ afterSign: scripts/electron-after-sign.cjs
 # release assets during the migration window.
 publish:
   - provider: github
-    owner: ankurshashwat
-    repo: openrind-desktop
+    owner: openrind
+    repo: openrind-shell
     releaseType: release
 mac:
   icon: resources/icons/icon.icns

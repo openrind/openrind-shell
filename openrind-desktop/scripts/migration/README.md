@@ -29,7 +29,7 @@ The next release is intentionally **non-destructive**:
 - Electron is built as a preview artifact on every push by
   `.github/workflows/build-electron-desktop.yml`.
 - Pushes to `dev` or `main` refresh the rolling prerelease bucket at
-  <https://github.com/different-ai/openwork/releases/tag/electron-preview-latest>.
+  <https://github.com/openrind/openrind-shell/releases/tag/electron-preview-latest>.
 - The Debug settings migration controls are Tauri-only and developer-mode only.
   The default action, **Prepare migration data**, only writes
   `migration-snapshot.v1.json`; it does not quit, replace, or delete Tauri.
@@ -44,7 +44,7 @@ before enabling any user-facing migration prompt.
 
 1. Wait for `Build Electron Desktop Preview` to finish on the target commit.
 2. Share the rolling preview release page:
-   <https://github.com/different-ai/openwork/releases/tag/electron-preview-latest>
+   <https://github.com/openrind/openrind-shell/releases/tag/electron-preview-latest>
 3. Ask testers to download the matching platform artifact:
    - macOS Apple Silicon: `openrind-desktop-mac-arm64-*.dmg` or `.zip`
    - macOS Intel: `openrind-desktop-mac-x64-*.dmg` or `.zip`
@@ -58,7 +58,7 @@ until the explicit migration release is cut and validated.
 
 ```bash
 node scripts/migration/01-cut-migration-release.mjs --version 0.12.0 \
-  --mac-url 'https://github.com/different-ai/openwork/releases/download/v0.12.0/Openrind Desktop-darwin-arm64-0.12.0-mac.zip' \
+  --mac-url 'https://github.com/openrind/openrind-shell/releases/download/v0.12.0/Openrind Desktop-darwin-arm64-0.12.0-mac.zip' \
   --dry-run         # inspect planned changes first
 ```
 

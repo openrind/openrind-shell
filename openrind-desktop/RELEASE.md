@@ -27,7 +27,7 @@ Openrind Desktop releases should be deterministic, easy to reproduce, and fully 
 2. Build sidecar assets and manifest:
    - `pnpm --filter openrind-desktop-orchestrator build:sidecars`
 3. Create the GitHub release for sidecars:
-   - `gh release create openrind-desktop-orchestrator-vX.Y.Z packages/orchestrator/dist/sidecars/* --repo different-ai/openwork`
+   - `gh release create openrind-desktop-orchestrator-vX.Y.Z packages/orchestrator/dist/sidecars/* --repo openrind/openrind-shell`
 4. Publish the package:
    - `pnpm --filter openrind-desktop-orchestrator publish --access public`
 
@@ -39,8 +39,8 @@ Openrind Desktop releases should be deterministic, easy to reproduce, and fully 
 ## Verification
 
 - `openrind-desktop start --workspace /path/to/workspace --check --check-events`
-- `gh run list --repo different-ai/openwork --workflow "Release App" --limit 5`
-- `gh release view vX.Y.Z --repo different-ai/openwork`
+- `gh run list --repo openrind/openrind-shell --workflow "Release App" --limit 5`
+- `gh release view vX.Y.Z --repo openrind/openrind-shell`
 
 Use `pnpm release:review --json` when automating these checks in scripts or agents.
 
