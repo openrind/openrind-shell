@@ -265,7 +265,7 @@ export function buildHaloopProfilesDocument(
           .update(requiredSecret(profile.clientToken, "Haloop client token"), "utf8")
           .digest("hex"),
         config: {
-          provider: "anthropic",
+          provider: upstream.mode === "openrouter-test" ? "openrouter" : "anthropic",
           api_key: upstream.apiKey,
           // TEMPORARY OPENROUTER TEST WORKAROUND: remove these two fields and
           // the matching env-gated resolver after the live integration proof.
@@ -841,6 +841,7 @@ async function stageProfiles(run, serialized) {
     `install -d -m 0700 ${HALOOP_STATE_DIR}`,
     `install -d -o 10001 -g 10001 -m 0700 ${HALOOP_COLLECTOR_DATA_DIR}`,
     `install -d -o 10001 -g 10001 -m 0700 ${HALOOP_REPORTS_DIR}`,
+    `if [ -d "${HALOOP_PROFILES_FILE}" ]; then rm -rf "${HALOOP_PROFILES_FILE}"; fi`,
     `install -m 0600 /dev/stdin ${HALOOP_PROFILES_FILE}.tmp`,
     `mv -f ${HALOOP_PROFILES_FILE}.tmp ${HALOOP_PROFILES_FILE}`,
   ].join("\n");
@@ -860,6 +861,7 @@ async function stageAnalysisEnvironment(run, serialized) {
     "set -euo pipefail",
     "umask 077",
     `install -d -m 0700 ${HALOOP_STATE_DIR}`,
+    `if [ -d ${HALOOP_ANALYSIS_ENV_FILE} ]; then rm -rf ${HALOOP_ANALYSIS_ENV_FILE}; fi`,
     `install -m 0600 /dev/stdin ${HALOOP_ANALYSIS_ENV_FILE}.tmp`,
     `mv -f ${HALOOP_ANALYSIS_ENV_FILE}.tmp ${HALOOP_ANALYSIS_ENV_FILE}`,
   ].join("\n");
@@ -1182,7 +1184,7 @@ export function createHaloopRuntimeManager({
 
   async function persistReadyRoute(route) {
     const result = await run(["-d", DISTRO_NAME, "--", "sh", "-c",
-      `umask 077; cat > ${HALOOP_READY_ROUTE_FILE}.tmp && mv ${HALOOP_READY_ROUTE_FILE}.tmp ${HALOOP_READY_ROUTE_FILE}`],
+      `umask 077; if [ -d ${HALOOP_READY_ROUTE_FILE} ]; then rm -rf ${HALOOP_READY_ROUTE_FILE}; fi; cat > ${HALOOP_READY_ROUTE_FILE}.tmp && mv ${HALOOP_READY_ROUTE_FILE}.tmp ${HALOOP_READY_ROUTE_FILE}`],
       { stdin: JSON.stringify(route), timeout: 10_000, user: "root" });
     if (result.exitCode !== 0) throw new Error("Could not persist the ready Haloop route.");
   }
@@ -1842,9 +1844,8 @@ export function createHaloopRuntimeManager({
             { timeout: 60_000 },
           );
           if (started.exitCode !== 0) {
-            throw new Error(
-              `Could not restart the managed Haloop container: ${(started.stderr || started.stdout).trim() || `exit ${started.exitCode}`}`,
-            );
+            await run(dockerArgs("rm", "-f", HALOOP_CONTAINER_NAME), { timeout: 15_000 });
+            await createGatewayContainer(run, profileHash);
           }
           gatewayStartedThisOperation = true;
         }
@@ -1936,7 +1937,7 @@ export function createHaloopRuntimeManager({
         }
         try {
           await checkedRun(["-d", DISTRO_NAME, "--", "sh", "-c",
-            "set -eu; " + stateFiles.map((file) => `if [ -f ${file}.${transactionId} ]; then mv -f ${file}.${transactionId} ${file}; else rm -f ${file}; fi`).join("; ")], { user: "root" });
+            "set -eu; " + stateFiles.map((file) => `if [ -f ${file}.${transactionId} ]; then rm -rf ${file}; mv -f ${file}.${transactionId} ${file}; else rm -rf ${file}; fi`).join("; ")], { user: "root" });
           for (const held of heldContainers.reverse()) {
             const candidate = await inspectContainer(run, held.name);
             if (candidate) await removeManagedContainer(run, held.name, "replacement");

@@ -133,17 +133,19 @@ def main():
     credential = os.environ.get('ANTHROPIC_API_KEY', '')
     if not credential.startswith('openshell:resolve:env:'):
         raise ValueError('The OpenShell Haloop provider credential is missing. Reconnect from Desktop.')
+    openrouter_key = os.environ.get('OPENROUTER_API_KEY') or credential
+    admin_token = os.environ.get('ADMIN_TOKEN') or os.environ.get('W8_BYOH_ADMIN_TOKEN') or ''
     base = normalize_gateway_url(os.environ.get('HALOOP_GATEWAY_URL') or os.environ.get('LLM_BASE_URL') or BASE_URL)
     openai_base = f"{base}/v1" if not base.endswith('/v1') else base
-    model = os.environ.get('OPENRIND_SHELL_OPENHANDS_MODEL') or os.environ.get('LLM_MODEL') or 'openai/inclusionai/ling-3.0-flash-sante:free'
+    model = os.environ.get('OPENRIND_SHELL_OPENHANDS_MODEL') or os.environ.get('LLM_MODEL') or 'openai/nvidia/nemotron-3.5-lightning:free'
     os.chdir(WORKSPACE)
-    os.environ.update({
+    env_updates = {
         'HOME': '/sandbox/openhands-home',
         'LLM_MODEL': model,
         'LLM_BASE_URL': openai_base,
         'LLM_API_KEY': credential,
         'OPENAI_API_KEY': credential,
-        'OPENROUTER_API_KEY': credential,
+        'OPENROUTER_API_KEY': openrouter_key,
         'ANTHROPIC_API_KEY': credential,
         'ANTHROPIC_BASE_URL': base,
         'ANTHROPIC_API_BASE': base,
@@ -154,7 +156,14 @@ def main():
         'DO_NOT_TRACK': '1',
         'LITELLM_LOCAL_MODEL_COST_MAP': 'True',
         'LITELLM_MODE': 'PRODUCTION',
-    })
+    }
+    if admin_token:
+        env_updates['ADMIN_TOKEN'] = admin_token
+    if os.environ.get('OPENRIND_BROWSER_GRANT'):
+        env_updates['OPENRIND_BROWSER_GRANT'] = os.environ['OPENRIND_BROWSER_GRANT']
+    if os.environ.get('OPENRIND_BROWSER_SERVICE_TOKEN'):
+        env_updates['OPENRIND_BROWSER_SERVICE_TOKEN'] = os.environ['OPENRIND_BROWSER_SERVICE_TOKEN']
+    os.environ.update(env_updates)
     # No nested Docker/cloud runtime: the local CLI executes inside OpenShell.
     args = ['openhands', '--override-with-envs']
     if mode == 'script':

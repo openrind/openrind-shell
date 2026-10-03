@@ -13,10 +13,12 @@ for (const [entry, name] of entries) {
 const built = await build({
   absWorkingDir: here, entryPoints: [entry], outfile: `dist/${name}.cjs`,
   bundle: true, platform: 'node', target: 'node22.19', format: 'cjs', write: false,
+  external: ['playwright', 'playwright-core'],
   // Resolve the shared source against this isolated, locked build dependency set.
   alias: {
     '@openrind/browser-contract': fileURLToPath(new URL('../../packages/browser-contract/src/index.mjs', import.meta.url)),
     '@openrind/browser-core': fileURLToPath(new URL('../../packages/browser-core/src/index.mjs', import.meta.url)),
+    '@openrind/browser-drivers': fileURLToPath(new URL('../../packages/browser-drivers/src/index.mjs', import.meta.url)),
     '@openrind/browser-providers': fileURLToPath(new URL('../../packages/browser-providers/src/index.mjs', import.meta.url)),
     zod: fileURLToPath(new URL('./node_modules/zod', import.meta.url)),
   },

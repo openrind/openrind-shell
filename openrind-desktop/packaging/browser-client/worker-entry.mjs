@@ -38,7 +38,7 @@ async function main() {
   process.once('disconnect', stop);
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.once(signal, stop);
   const settings = await new Promise((resolve, reject) => {
-    startupTimer = setTimeout(() => reject(new Error('Worker bootstrap timeout')), 5000);
+    startupTimer = setTimeout(() => reject(new Error('Worker bootstrap timeout')), 20_000);
     process.once('message', message => { clearTimeout(startupTimer); resolve(message); });
   });
   if (!exact(settings, ['type', 'databasePath', 'serviceToken']) || settings.type !== 'initialize' ||

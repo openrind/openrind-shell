@@ -6,6 +6,7 @@ import {
   Download,
   ExternalLink,
   FileText,
+  Globe,
   Loader2,
   MessageSquare,
   Mic,
@@ -34,6 +35,7 @@ import { Button } from "../../../design-system/button";
 import { useVoiceInput } from "./composer/voice/use-voice-input";
 import { formatBytes } from "../../../../app/utils";
 import { useStatusToasts } from "../../shell-feedback/status-toasts";
+import { BrowserPanel, useBrowserStore } from "../../browser";
 
 // Shared flat toolbar button, matching the bottom status bar items (Docs, Feedback)
 // so the title bar toolbar reads with the exact same styling, colors, and font sizing.
@@ -604,6 +606,17 @@ export function OpenrindShellTerminal(props: OpenrindShellTerminalProps) {
   // Track whether this component has ever reached "connected" phase so we
   // can show "Launch session" on first open vs "Reconnect" after a drop.
   const [hasEverConnected, setHasEverConnected] = useState(false);
+  const [browserOpen, setBrowserOpen] = useState(false);
+  const browser = useBrowserStore(props.sessionId || sandboxName || expectedSandboxName || "default_sandbox");
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        fitRef.current?.fit();
+      } catch {}
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [browserOpen]);
 
   // True when the current error message means the sandbox must be deleted
   // before a retry can succeed (stuck-provisioning or container error state).
@@ -1621,6 +1634,17 @@ export function OpenrindShellTerminal(props: OpenrindShellTerminalProps) {
                   Files{sandboxFiles.length > 0 ? ` (${sandboxFiles.length})` : ""}
                 </span>
               </button>
+              <button
+                type="button"
+                className={`${TOOLBAR_BTN} ${browserOpen ? "bg-dls-hover text-dls-text font-semibold" : ""}`}
+                aria-label="Browser Agent"
+                onClick={() => setBrowserOpen((prev) => !prev)}
+                onMouseDown={(e) => e.preventDefault()}
+                title="Toggle Browser Agent panel"
+              >
+                <Globe className="h-4 w-4" />
+                <span className="text-[11px] font-medium">Browser</span>
+              </button>
               <TerminalMicButton
                 onText={(text) => {
                   const id = sessionIdRef.current;
@@ -1658,8 +1682,9 @@ export function OpenrindShellTerminal(props: OpenrindShellTerminalProps) {
           so xterm.js fit() measures correctly on first paint (avoids cols=1
           vertical-text bug). Loading / error overlays sit on top via absolute
           positioning rather than hiding the container with display:none. */}
-      <div className="relative flex-1 min-h-0">
-        {/* Terminal container: always focused when the cursor is over it.
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        <div className="relative min-h-0 flex-1">
+          {/* Terminal container: always focused when the cursor is over it.
             focus-on-hover means the user doesn't need to click after
             interacting with toolbar buttons — moving the mouse back over
             the terminal instantly restores keystroke capture so Claude
@@ -1720,6 +1745,22 @@ export function OpenrindShellTerminal(props: OpenrindShellTerminalProps) {
               onAbort={handleAbort}
             />
           </div>
+        ) : null}
+        </div>
+
+        {browserOpen ? (
+          <aside style={{ width: 380, minWidth: 320 }} className="flex flex-col border-l border-dls-border bg-dls-surface z-20">
+            <BrowserPanel
+              state={browser.state}
+              onStart={browser.startSession}
+              onStop={browser.stopSession}
+              onNavigate={browser.navigate}
+              onTakeControl={browser.takeControl}
+              onResume={browser.resumeControl}
+              onSetBounds={browser.setBounds}
+              onClosePanel={() => setBrowserOpen(false)}
+            />
+          </aside>
         ) : null}
       </div>
 

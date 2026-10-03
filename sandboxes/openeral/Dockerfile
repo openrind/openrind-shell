@@ -86,6 +86,7 @@ RUN mkdir -p /etc/openrind-browser \
 COPY sandboxes/openeral/openhands-agent.py /opt/openrind-openhands/openhands-agent.py
 COPY sandboxes/openeral/openrind-openhands-fuse.sh /usr/local/bin/openrind-openhands
 COPY sandboxes/openeral/openeral-claude-fuse.sh /usr/local/bin/claude
+COPY sandboxes/openeral/haloop-agent-proxy.mjs /opt/openrind-shell/haloop-agent-proxy.mjs
 COPY sandboxes/openeral/pg-client-fuse.mjs /usr/local/bin/pg
 COPY sandboxes/openeral/setup-fuse.sh /opt/openrind-shell/setup.sh
 COPY sandboxes/openeral/openrind-pty-bridge.py /opt/openrind-shell/openrind-pty-bridge.py
@@ -97,6 +98,7 @@ COPY sandboxes/openeral/supabase-root-2021-ca.pem /opt/openrind-shell/certs/supa
 RUN chmod 755 /usr/local/bin/openrind-shell-fused /usr/local/bin/claude /usr/local/bin/pg /usr/local/bin/openrind-desktop-claude-launch \
         /usr/local/bin/openrind-openhands /usr/local/bin/openrind-openhands-agent \
         /usr/local/bin/openrind-openclaw /usr/local/bin/openrind-openclaw-agent \
+        /opt/openrind-shell/haloop-agent-proxy.mjs \
         /opt/openrind-shell/setup.sh /opt/openrind-shell/openrind-pty-bridge.py \
         /opt/openrind-shell/configure-haloop.mjs \
         /opt/openrind-shell/configure-openclaw-fuse.mjs \

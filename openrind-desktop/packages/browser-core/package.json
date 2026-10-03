@@ -2,6 +2,6 @@
   "name": "@openrind/browser-core", "version": "0.0.0", "private": true, "type": "module",
   "exports": { ".": "./src/index.mjs" },
   "dependencies": { "@openrind/browser-contract": "workspace:*" },
-  "engines": { "node": ">=22.19.0" },
+  "engines": { "node": ">=22.12.0" },
   "scripts": { "test": "node --test test/*.test.mjs" }
 }

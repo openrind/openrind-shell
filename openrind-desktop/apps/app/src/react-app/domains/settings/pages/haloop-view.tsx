@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 import { useCallback, useState } from "react";
-import { ExternalLink, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 
 import { t } from "../../../../i18n";
 import { Button } from "../../../design-system/button";
@@ -249,28 +249,6 @@ export function HaloopView(props: HaloopViewProps) {
               Rotate token
             </Button>
           ) : null}
-        </div>
-      </div>
-
-      <div className={`${settingsPanelClass} space-y-4`}>
-        <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1">
-            <h3 className="text-sm font-semibold text-gray-12">Observability & Traces</h3>
-            <p className="text-xs text-gray-10 leading-relaxed">
-              Traces, live span metrics, HALO evaluations, and performance analytics are managed on the w8-haloop web dashboard.
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            className="h-8 shrink-0 rounded-full px-3 text-xs"
-            onClick={() => {
-              if (typeof window !== "undefined") {
-                window.open("http://136.112.93.84:3000/", "_blank");
-              }
-            }}
-          >
-            <ExternalLink size={12} className="mr-1.5" /> Open Web Dashboard
-          </Button>
         </div>
       </div>
 

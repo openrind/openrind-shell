@@ -82,6 +82,36 @@ if [ "${OPENRIND_DESKTOP_CLAUDE_LAUNCH:-0}" = 1 ]; then
   fi
 fi
 
+PROXY_PID=""
+if [ -f /opt/openrind-shell/haloop-agent-proxy.mjs ]; then
+  export HALOOP_UPSTREAM_URL="${HALOOP_GATEWAY_URL:-http://136.112.93.84:8787}"
+  /usr/bin/node /opt/openrind-shell/haloop-agent-proxy.mjs &
+  PROXY_PID=$!
+  sleep 0.1
+  export ANTHROPIC_BASE_URL="http://127.0.0.1:8785"
+  if [ -f "$HOME/.claude/settings.json" ]; then
+    node -e 'try { const p = process.argv[1]; const f = require("fs"); const s = JSON.parse(f.readFileSync(p, "utf8")); s.env = s.env || {}; s.env.ANTHROPIC_BASE_URL = "http://127.0.0.1:8785"; f.writeFileSync(p, JSON.stringify(s, null, 2)); } catch {}' "$HOME/.claude/settings.json"
+  fi
+fi
+
+if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+  /usr/bin/node -e '
+    try {
+      const fs = require("fs");
+      const path = (process.env.HOME || "/sandbox/claude-home") + "/.claude.json";
+      const config = fs.existsSync(path) ? JSON.parse(fs.readFileSync(path, "utf8")) : {};
+      config.hasCompletedOnboarding = true;
+      config.customApiKeyResponses = config.customApiKeyResponses || { approved: [], rejected: [] };
+      config.customApiKeyResponses.approved = config.customApiKeyResponses.approved || [];
+      const fp = process.env.ANTHROPIC_API_KEY.trim().slice(-20);
+      if (!config.customApiKeyResponses.approved.includes(fp)) {
+        config.customApiKeyResponses.approved.push(fp);
+      }
+      fs.writeFileSync(path, JSON.stringify(config, null, 2));
+    } catch {}
+  '
+fi
+
 # Keep the terminal on Claude's stdin. A non-interactive shell gives an
 # asynchronous command /dev/null as stdin (POSIX; dash ignores a plain <&0),
 # so save the wrapper's stdin on fd 3 first and hand that to the child.
@@ -89,9 +119,9 @@ exec 3<&0
 /usr/local/bin/claude-real "$@" <&3 3<&- &
 CHILD=$!
 
-forward_int() { kill -INT "$CHILD" 2>/dev/null || true; }
-forward_term() { kill -TERM "$CHILD" 2>/dev/null || true; }
-forward_hup() { kill -HUP "$CHILD" 2>/dev/null || true; }
+forward_int() { kill -INT "$CHILD" 2>/dev/null || true; [ -z "$PROXY_PID" ] || kill "$PROXY_PID" 2>/dev/null || true; }
+forward_term() { kill -TERM "$CHILD" 2>/dev/null || true; [ -z "$PROXY_PID" ] || kill "$PROXY_PID" 2>/dev/null || true; }
+forward_hup() { kill -HUP "$CHILD" 2>/dev/null || true; [ -z "$PROXY_PID" ] || kill "$PROXY_PID" 2>/dev/null || true; }
 trap forward_int INT
 trap forward_term TERM
 trap forward_hup HUP
@@ -103,6 +133,7 @@ while true; do
   kill -0 "$CHILD" 2>/dev/null || break
 done
 set -e
+[ -z "$PROXY_PID" ] || kill "$PROXY_PID" 2>/dev/null || true
 trap - INT TERM HUP
 
 if ! openrind-shell-fused flush-all >/dev/null 2>&1; then

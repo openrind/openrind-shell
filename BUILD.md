@@ -333,6 +333,30 @@ relay the tunnel; Node/Rust then require and verify PostgreSQL TLS end to end.
 
 The detailed contract and rejected alternatives are in
 [FUSE-DESIGN.md](./FUSE-DESIGN.md) and [FUSE.md](./FUSE.md).
+
+## Browser Agent Packages Build and Test
+
+The browser agent subsystem consists of workspace packages under `openrind-desktop/packages/`:
+
+```bash
+cd openrind-desktop
+
+# Run unit and integration tests across core, providers, artifacts, and handoff
+NODE_OPTIONS="--experimental-sqlite" node --test \
+  packages/browser-core/test/core.test.mjs \
+  packages/browser-core/test/artifacts.test.mjs \
+  packages/browser-providers/test/local-chromium.test.mjs \
+  packages/browser-providers/test/browserbase.test.mjs \
+  packages/browser-service/test/standalone.test.mjs \
+  packaging/browser-client/step3.test.mjs \
+  apps/desktop/__tests__/browser-broker.test.mjs \
+  apps/desktop/__tests__/browser-handoff.test.mjs
+
+# Build client bundles and run checksum integrity checks
+cd packaging/browser-client
+npm ci
+node build.mjs --checks
+```
 # Required production image publication
 
 Before packaging Desktop, publish the sandbox image and run the root

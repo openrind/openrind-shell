@@ -36,8 +36,15 @@ case "$session_context" in
   *:*)
     browser_grant="${session_context#*:}"
     session_context="${session_context%%:*}"
-    if [ "$profile" != openrind-shell-claude ] || ! printf '%s' "$browser_grant" | grep -Eq '^[A-Za-z0-9_-]{43}$'; then
-      echo "Openrind Shell: browser launch grant is invalid. Reconnect the session."
+    case "$profile" in
+      openrind-shell-claude|openrind-shell-openhands|openrind-shell-openhands-script|openrind-shell-openclaw) ;;
+      *)
+        echo "Openrind Shell: browser launch grant is invalid. Reconnect the session."
+        exit 64
+        ;;
+    esac
+    if ! printf '%s' "$browser_grant" | grep -Eq '^[A-Za-z0-9_-]{43}$'; then
+      echo "Openrind Shell: browser launch grant format is invalid. Reconnect the session."
       exit 64
     fi
     export OPENRIND_BROWSER_GRANT="$browser_grant"

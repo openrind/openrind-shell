@@ -27,7 +27,7 @@ export const ToolSchemas = Object.freeze({
   browser_capabilities: strict({ sessionId: id.optional() }),
   browser_start: strict({ ...operation, provider: ProviderKind, profileMode: ProfileMode.default('ephemeral'),
     profileId: id.optional(), url: Url.optional(), networkEnforcement: z.enum(['application-guardrails', 'enforced-backend-policy']).default('application-guardrails') })
-    .refine(v => (v.profileMode === 'ephemeral') === !v.profileId, 'Retained profiles require an approved profile ID'),
+    .refine(v => (v.profileMode === 'host-retained' ? Boolean(v.profileId) : !v.profileId), 'Retained profiles require an approved profile ID'),
   browser_status: strict({ sessionId: id, sessionEpoch: epoch.optional() }),
   browser_tabs: strict({ ...session, action: z.enum(['list', 'open', 'close']),
     operationId: id.optional(), pageId: id.optional(), url: Url.optional() }).refine(v =>

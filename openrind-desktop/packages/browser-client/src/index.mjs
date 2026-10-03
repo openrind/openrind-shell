@@ -1,4 +1,7 @@
 import { LOCAL_TOOLS, parseTool, toolDefinitions, BrowserFault } from '@openrind/browser-contract';
+import { createLocalTransfers, assertPathBeneath, verifyNoSymlinkEscape } from './transfers.mjs';
+
+export { createLocalTransfers, assertPathBeneath, verifyNoSymlinkEscape };
 export const clientToolDefinitions = () => toolDefinitions({ local: true });
 export function validateClientRequest(name, input) { return parseTool(name, input, { local: true }); }
 export async function routeClientRequest(name, input, { remote, localTransfers }) {

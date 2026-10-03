@@ -219,3 +219,37 @@ flowchart LR
 
 This path is useful when every command is interpreted by just-bash. Native Claude Code
 uses the kernel-backed sandbox paths above and does not see `/db` as a virtual mount.
+
+## Browser Agent Architecture
+
+The Browser Agent subsystem provides 19 structured tools to sandboxed AI agents (such as Claude) without running a heavy, unconfined browser engine inside the agent container.
+
+```mermaid
+flowchart LR
+  Agent["Claude in OpenShell"] --> Client["Fixed stdio MCP client"]
+  Client --> Bridge["WSL-to-Windows CBOR stream"]
+  Bridge --> Service["Openrind Browser Service"]
+  Service --> Core["Browser Core<br/>Journal / Auth / State / Refs"]
+  Core --> PW["Playwright Driver"]
+  PW --> Local["Local Chromium"]
+  PW --> Cloud["Browserbase CDP"]
+  Core --> Broker["OwnedContentsBroker"]
+  Broker --> Webview["Desktop WebContentsView"]
+  Client --> LocalTools["Client-Local Tools<br/>import_file / save_artifact"]
+  LocalTools --> FUSE["/sandbox/work via FUSE"]
+```
+
+### Core Security Boundaries
+
+1. **No Browser Inside Agent Sandbox**: Chromium and CDP execute exclusively on the host or in isolated cloud sessions. The agent receives only structured MCP tools (`browser_navigate`, `browser_snapshot`, `browser_click`, etc.).
+2. **Deterministic References & Epochs**: Every snapshot returns element references bound to the session epoch and document generation. Navigations, mutations, or human takeovers invalidate all references, returning `STALE_REF` if reused.
+3. **Artifact Confinement**:
+   - `browser_import_file` and `browser_save_artifact` enforce strict workspace-relative path confinement, blocking traversal (`..`) and symlink escapes with `POLICY_DENIED`.
+   - File exports use exclusive temporary file creation, byte/hash verification, `fsync`, and atomic rename into `/sandbox/work`.
+4. **Hardened WebContentsView**:
+   - Embedded views run with `sandbox: true`, `contextIsolation: true`, `nodeIntegration: false`, and no preload script.
+   - Popups and permissions (camera, geolocation, mic) are unconditionally denied.
+   - Debugger detaches or renderer crashes immediately fence the view.
+5. **Ordered Human Handoff**:
+   - Taking control transitions the session to `HumanControl`, increments the epoch, and blocks all agent mutations and observations.
+   - Resuming requires explicit user release, advancing the epoch and requiring fresh semantic DOM snapshots.

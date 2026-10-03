@@ -252,5 +252,6 @@ export function deriveOpenrindShellSandboxName(workspaceId) {
     throw new Error("Cannot derive Openrind Shell sandbox name from empty workspace id.");
   }
   const hash = createHash("sha256").update(normalized).digest("hex").slice(0, 8);
-  return `or-${normalized.slice(0, 7)}-${hash}`;
+  const slug = normalized.slice(0, 7).replace(/^-+|-+$/g, "") || "sbx";
+  return `or-${slug}-${hash}`.replace(/-+/g, "-");
 }

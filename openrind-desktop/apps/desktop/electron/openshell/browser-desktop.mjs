@@ -28,10 +28,10 @@ export function createDesktopBrowserController({ resourcesPath, userDataPath, on
     return starting;
   }
   return Object.freeze({
-    async prepare({ sandboxName, conversationId, onLost }) {
+    async prepare({ sandboxName, conversationId, profile = 'openrind-shell-claude', onLost }) {
       if (typeof conversationId !== 'string' || !/^[a-f0-9]{32}$/.test(conversationId)) throw new Error('A trusted conversation identity is required');
       // Resolve the recorded sandbox workspace; never fall back to a renderer ID.
-      const workspaceId = await resolveOpenrindShellSandboxWorkspaceId({ name: sandboxName, profile: 'openrind-shell-claude' });
+      const workspaceId = await resolveOpenrindShellSandboxWorkspaceId({ name: sandboxName, profile });
       const active = await ensure();
       return active.prepare({ sandboxName, onLost,
         scope: { tenantId: id('local', userDataPath), workspaceId: id('workspace', workspaceId),

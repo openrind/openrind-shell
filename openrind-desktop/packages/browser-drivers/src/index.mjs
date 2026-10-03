@@ -1,4 +1,8 @@
 import { BrowserFault } from '@openrind/browser-contract';
+import { PlaywrightPageDriver, PlaywrightSession, findChromiumExecutable } from './playwright-driver.mjs';
+
+export { PlaywrightPageDriver, PlaywrightSession, findChromiumExecutable };
+
 // Shared adapter guard. Real Playwright/Electron drivers arrive in their
 // vertical slices; this package does not expose arbitrary CDP or evaluation.
 export function assertDriver(driver) {

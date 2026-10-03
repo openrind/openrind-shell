@@ -32,7 +32,7 @@ export async function startBrowserRuntime({ resourceRoot, nodeExecutable, databa
   const env = {};
   for (const key of ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATH']) if (process.env[key]) env[key] = process.env[key];
   const worker = fork(join(resourceRoot, 'worker.cjs'), [], {
-    execPath: nodeExecutable, execArgv: [], env,
+    execPath: nodeExecutable, execArgv: ['--experimental-sqlite'], env,
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'], windowsHide: true,
   });
   let edge;

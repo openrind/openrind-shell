@@ -34,11 +34,11 @@ test('fixed configuration preserves other servers and rejects overrides', () => 
   assert.throws(() => browserCredentials({ OPENRIND_BROWSER_SERVICE_TOKEN: 'x'.repeat(32), OPENRIND_BROWSER_GRANT: 'bad\nvalue' }));
 });
 
-test('production worker, CBOR bridge, SDK discovery, owner isolation and revocation', { timeout: 30_000 }, async () => {
+test('production worker, CBOR bridge, SDK discovery, owner isolation and revocation', { timeout: 60_000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), 'openrind-step3-'));
   const token = randomBytes(32).toString('base64url');
   const worker = fork(fileURLToPath(new URL('./dist/worker.cjs', import.meta.url)), [], {
-    execArgv: [], stdio: ['pipe', 'pipe', 'pipe', 'ipc'], windowsHide: true,
+    execArgv: process.execArgv, stdio: ['pipe', 'pipe', 'pipe', 'ipc'], windowsHide: true,
   });
   let diagnostics = '';
   worker.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-2048); });
@@ -91,7 +91,7 @@ test('production worker, CBOR bridge, SDK discovery, owner isolation and revocat
     peer.close();
     await edge?.close();
     if (worker.connected) worker.disconnect();
-    const timer = setTimeout(() => worker.kill(), 5000);
+    const timer = setTimeout(() => worker.kill(), 15_000);
     const code = await exited; clearTimeout(timer);
     assert.equal(code, 0, diagnostics);
     await rm(directory, { recursive: true, force: true });

@@ -2,5 +2,5 @@
   "name": "@openrind/browser-service", "version": "0.0.0", "private": true, "type": "module",
   "exports": { ".": "./src/index.mjs", "./http": "./src/http.mjs", "./desktop-host": "./src/desktop-host.mjs", "./standalone": "./src/standalone.mjs", "./worker": "./src/worker.mjs" },
   "dependencies": { "@openrind/browser-contract": "workspace:*", "@openrind/browser-core": "workspace:*", "@openrind/browser-providers": "workspace:*" },
-  "engines": { "node": ">=22.19.0" }
+  "engines": { "node": ">=22.12.0" }
 }

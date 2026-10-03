@@ -39,6 +39,10 @@ openrind-desktop/packages/browser-contract/*
 openrind-desktop/packages/browser-core/*
 !openrind-desktop/packages/browser-core/src/
 !openrind-desktop/packages/browser-core/src/**
+!openrind-desktop/packages/browser-drivers/
+openrind-desktop/packages/browser-drivers/*
+!openrind-desktop/packages/browser-drivers/src/
+!openrind-desktop/packages/browser-drivers/src/**
 !openrind-desktop/packages/browser-providers/
 openrind-desktop/packages/browser-providers/*
 !openrind-desktop/packages/browser-providers/src/

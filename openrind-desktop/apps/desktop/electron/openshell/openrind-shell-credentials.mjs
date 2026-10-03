@@ -114,7 +114,16 @@ export async function setCredential(key, value) {
   // "password authentication failed for user 'postgres'" downstream
   // because pg's URL parser treats trailing whitespace as part of the
   // password.
-  const plaintext = String(value ?? "").trim();
+  let plaintext = String(value ?? "").trim();
+  if (key === "databaseUrl") {
+    if (plaintext.startsWith("DATABASE_URL=")) {
+      plaintext = plaintext.slice("DATABASE_URL=".length).trim();
+    }
+    if ((plaintext.startsWith("'") && plaintext.endsWith("'")) ||
+        (plaintext.startsWith('"') && plaintext.endsWith('"'))) {
+      plaintext = plaintext.slice(1, -1).trim();
+    }
+  }
   if (!plaintext) {
     throw new Error("Credential value is empty.");
   }

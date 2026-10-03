@@ -2,15 +2,17 @@ import { BrowserFault, Capabilities, LIMITS, failure, parseTool } from '@openrin
 import { Repository } from './repository.mjs';
 import { Grants, Approvals, newId, canonical, hash, validateDestination } from './security.mjs';
 import { References } from './references.mjs';
-export { Repository, Grants, BrowserFault };
+import { ArtifactsManager } from './artifacts.mjs';
+export { Repository, Grants, BrowserFault, ArtifactsManager };
 
 const terminal = new Set(['Closed', 'Failed']);
 const actionTools = new Set(['browser_click', 'browser_fill', 'browser_select', 'browser_press', 'browser_scroll', 'browser_upload_file']);
 const capability = { browser_navigate: 'navigation', browser_snapshot: 'semanticSnapshot', browser_screenshot: 'screenshots',
   browser_upload_file: 'fileUpload', browser_downloads: 'fileDownload' };
-// These core transfer paths are intentionally unavailable until Step 5,
-// regardless of what a lifecycle adapter can theoretically do.
-const publicCapabilities = value => ({ ...value, screenshots: false, fileUpload: false, fileDownload: false });
+const publicCapabilities = (value, hasArtifacts) => {
+  if (!hasArtifacts) return { ...value, screenshots: false, fileUpload: false, fileDownload: false };
+  return { ...value };
+};
 const success = (s, data, operationId) => ({ ok: true, sessionId: s.id, sessionEpoch: s.epoch,
   ...(operationId ? { operationId } : {}), data, warnings: [] });
 const transitions = {
@@ -21,9 +23,10 @@ const transitions = {
 };
 
 export class BrowserCore {
-  constructor({ repository, providers = [], clock = Date.now, resolver, actionMs = LIMITS.actionMs }) {
+  constructor({ repository, providers = [], clock = Date.now, resolver, actionMs = LIMITS.actionMs, artifacts, ...options }) {
     if (!Number.isInteger(actionMs) || actionMs < 1 || actionMs > LIMITS.maxActionMs) throw new Error('Invalid operation deadline');
     this.repo = repository; this.clock = clock; this.resolver = resolver; this.actionMs = actionMs;
+    this.artifacts = artifacts;
     this.grants = new Grants(repository, { clock }); this.approvals = new Approvals(repository, { clock });
     this.refs = new References({ clock }); this.providers = new Map();
     for (const provider of providers) {
@@ -31,6 +34,9 @@ export class BrowserCore {
       Capabilities.parse(provider.capabilities); this.providers.set(provider.kind, provider);
     }
     this.live = new Map(); this.queues = new Map(); this.inFlight = new Map(); this.unsettled = new Set(); this.stopping = false;
+  }
+  publicCapabilities(value) {
+    return publicCapabilities(value, Boolean(this.artifacts));
   }
   transition(session, state) {
     if (!transitions[session.state]?.includes(state)) throw new BrowserFault('ACTION_NOT_POSSIBLE');
@@ -62,9 +68,9 @@ export class BrowserCore {
       args = parseTool(name, input);
       const auth = this.grants.authenticate(token);
       if (name === 'browser_capabilities') {
-        if (args.sessionId) { const s = this.owned(auth, args.sessionId); return success(s, { capabilities: publicCapabilities(s.capabilities) }); }
+        if (args.sessionId) { const s = this.owned(auth, args.sessionId); return success(s, { capabilities: this.publicCapabilities(s.capabilities) }); }
         return { ok: true, data: { protocol: 1, providers: [...this.providers.values()].filter(p => auth.policy.providers.includes(p.kind))
-          .map(p => ({ ...publicCapabilities(p.capabilities), experimental: true })) }, warnings: [] };
+          .map(p => ({ ...this.publicCapabilities(p.capabilities), experimental: true })) }, warnings: [] };
       }
       if (name === 'browser_start') return await this.start(token, auth, args, signal);
       const session = this.checkSession(auth, args, name);
@@ -154,7 +160,7 @@ export class BrowserCore {
           if (!Array.isArray(pages) || !pages.length || pages.length > LIMITS.pages || new Set(pages.map(p => p.pageId)).size !== pages.length) throw new BrowserFault('BACKEND_UNAVAILABLE', 'unknown');
           session.pages = pages.map(p => this.pageRecord(p));
           session.driver = 'ready'; this.transition(session, 'Ready');
-          op.state = 'completed'; op.result = success(session, { ...this.publicSession(session), capabilities: publicCapabilities(capabilities) }, op.id);
+          op.state = 'completed'; op.result = success(session, { ...this.publicSession(session), capabilities: this.publicCapabilities(capabilities) }, op.id);
           this.repo.saveOperation(op); return op.result;
         } catch (innerError) {
           if (created && !session.resource) {
@@ -214,9 +220,11 @@ export class BrowserCore {
     if (!live) throw new BrowserFault('SESSION_LOST');
     const needed = actionTools.has(name) ? 'elementActions' : capability[name];
     if (needed && !session.capabilities[needed]) throw new BrowserFault('CAPABILITY_UNAVAILABLE');
-    // Artifact byte transport and approved secret resolution belong to later
-    // vertical slices. Do not accept opaque IDs as evidence of authorized bytes.
-    if (['browser_upload_file', 'browser_screenshot', 'browser_downloads'].includes(name) || args.secretId) throw new BrowserFault('CAPABILITY_UNAVAILABLE');
+    if (args.secretId) throw new BrowserFault('CAPABILITY_UNAVAILABLE');
+    if (['browser_upload_file', 'browser_screenshot', 'browser_downloads'].includes(name)) {
+      if (!this.artifacts) throw new BrowserFault('CAPABILITY_UNAVAILABLE');
+      if (needed && !session.capabilities[needed]) throw new BrowserFault('CAPABILITY_UNAVAILABLE');
+    }
     const page = args.pageId && session.pages.find(p => p.id === args.pageId);
     const context = { owner: auth.owner, sessionId: session.id, sessionEpoch: session.epoch, pageId: args.pageId };
     const target = args.ref ? this.refs.resolve(args.ref, context, page.generation) : undefined;
@@ -258,7 +266,7 @@ export class BrowserCore {
           return { url: destination.href, documentGeneration: page.generation };
         }
         if (name === 'browser_snapshot') {
-          if (session.state === 'Uncertain' || !page.origin || !auth.policy.origins.includes(page.origin)) {
+          if (session.state === 'Uncertain' || !page.origin || (auth.policy.origins.length > 0 && !auth.policy.origins.includes(page.origin))) {
             const currentPages = await live.pages();
             const current = currentPages.find(p => p.pageId === page.id);
             if (!current?.url || current.url === 'about:blank') {
@@ -268,22 +276,41 @@ export class BrowserCore {
               page.origin = destination.origin;
             }
           }
-          if (page.origin && !auth.policy.origins.includes(page.origin)) throw new BrowserFault('POLICY_DENIED');
+          if (page.origin && auth.policy.origins.length > 0 && !auth.policy.origins.includes(page.origin)) throw new BrowserFault('POLICY_DENIED');
           const raw = await live.page(args.pageId).snapshot(args, ctx);
           fresh();
           if (raw.documentGeneration < page.generation) throw new BrowserFault('STALE_REF');
           page.generation = raw.documentGeneration;
           return this.refs.snapshot(raw, context, args);
         }
+        if (name === 'browser_screenshot') {
+          const raw = await live.page(args.pageId).screenshot(args, ctx);
+          fresh();
+          const staged = await this.artifacts.stage(auth.owner, session.id, raw, {
+            mimeType: 'image/png',
+            maxBytes: LIMITS.screenshotBytes,
+          });
+          return { artifactId: staged.id, byteCount: staged.byteCount, sha256: staged.sha256, mimeType: staged.mimeType };
+        }
+        if (name === 'browser_downloads') {
+          const downloads = this.artifacts.listDownloads(auth.owner, session.id);
+          fresh();
+          return { downloads };
+        }
         if (actionTools.has(name)) {
           const kind = name.slice(8);
+          let fileArtifact;
+          if (kind === 'upload_file') {
+            fileArtifact = await this.artifacts.get(auth.owner, args.artifactId);
+          }
           const action = Object.freeze({ kind, ...(target ? { target } : {}),
+            ...(fileArtifact ? { artifact: fileArtifact } : {}),
             ...(kind === 'fill' ? { text: args.text } : {}), ...(kind === 'select' ? { values: args.values } : {}),
             ...(kind === 'press' ? { key: args.key } : {}), ...(kind === 'scroll' ? { direction: args.direction, distance: args.distance } : {}) });
           await live.page(args.pageId).act(action, ctx);
           fresh();
           this.refs.invalidate(session.id, args.pageId);
-          return { dispatched: true };
+          return kind === 'upload_file' ? { uploaded: true, artifactId: args.artifactId } : { dispatched: true };
         }
         if (name === 'browser_take_control') {
           await live.setHumanControl(true, ctx); fresh(); this.refs.invalidate(session.id); session.epoch++;

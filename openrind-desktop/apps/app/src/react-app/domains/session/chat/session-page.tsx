@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Check, Loader2, Minimize2, Redo2, Undo2, Zap } from "lucide-react";
+import { Check, Globe, Loader2, Minimize2, Redo2, Undo2, Zap } from "lucide-react";
 
 import { t } from "../../../../i18n";
 import { buildOpenrindDesktopWorkspaceBaseUrl, type OpenrindDesktopServerClient, type OpenrindDesktopServerStatus } from "../../../../app/lib/openrind-desktop-server";
@@ -33,6 +33,7 @@ import {
 } from "../../../shell/workspace-shell-layout";
 import { OwDotTicker } from "../../../shell/dot-ticker";
 import { useReactRenderWatchdog } from "../../../shell/react-render-watchdog";
+import { BrowserPanel, useBrowserStore } from "../../browser";
 
 type StatusBarOverrides = Pick<
   StatusBarProps,
@@ -177,10 +178,19 @@ function sessionTitleForId(groups: WorkspaceSessionGroup[], id: string | null | 
 }
 
 export function SessionPage(props: SessionPageProps) {
-  const { leftSidebarWidth, startLeftSidebarResize } = useWorkspaceShellLayout({
+  const {
+    leftSidebarWidth,
+    rightSidebarExpanded,
+    rightSidebarWidth,
+    setRightSidebarExpanded,
+    startLeftSidebarResize,
+    toggleRightSidebar,
+  } = useWorkspaceShellLayout({
     defaultLeftWidth: DEFAULT_WORKSPACE_LEFT_SIDEBAR_WIDTH,
-    expandedRightWidth: 280,
+    expandedRightWidth: 380,
   });
+
+  const browser = useBrowserStore(props.selectedSessionId || "default_session");
   // Default to sessions when the route does not drive the tab.
   const sidebarTab: SidebarTab = props.sidebarTab ?? "sessions";
   useReactRenderWatchdog("SessionPage", {
@@ -422,6 +432,21 @@ export function SessionPage(props: SessionPageProps) {
                   </button>
                 </>
               ) : null}
+
+              <button
+                type="button"
+                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
+                  rightSidebarExpanded
+                    ? "bg-blue-600/20 text-blue-400"
+                    : "text-gray-10 hover:bg-gray-2/70 hover:text-dls-text"
+                }`}
+                onClick={toggleRightSidebar}
+                title="Toggle Browser Agent Panel"
+                aria-label="Toggle Browser Agent Panel"
+              >
+                <Globe size={16} />
+                <span className="hidden lg:inline">Browser</span>
+              </button>
             </div>
           </header>
           )}
@@ -518,6 +543,20 @@ export function SessionPage(props: SessionPageProps) {
                 </div>
               ) : null}
             </div>
+
+            {rightSidebarExpanded ? (
+              <aside style={{ width: Math.max(340, rightSidebarWidth) }} className="flex flex-col border-l border-dls-border">
+                <BrowserPanel
+                  state={browser.state}
+                  onStart={browser.startSession}
+                  onStop={browser.stopSession}
+                  onTakeControl={browser.takeControl}
+                  onResume={browser.resumeControl}
+                  onSetBounds={browser.setBounds}
+                  onClosePanel={() => setRightSidebarExpanded(false)}
+                />
+              </aside>
+            ) : null}
           </div>
 
           {todos.length > 0 ? (

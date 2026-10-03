@@ -19,6 +19,18 @@ credentials:
     required: false
     auth_style: bearer
     header_name: Authorization
+  - name: openrouter_key
+    description: Optional OpenRouter API key for Haloop routing
+    env_vars: [OPENROUTER_API_KEY]
+    required: false
+    auth_style: bearer
+    header_name: x-w8-haloop-openrouter-key
+  - name: admin_token
+    description: Scoped BYOH admin token for Haloop reward rollouts
+    env_vars: [ADMIN_TOKEN, W8_BYOH_ADMIN_TOKEN]
+    required: false
+    auth_style: header
+    header_name: x-w8-haloop-admin-token
 discovery:
   credentials: [client_token]
 endpoints:
@@ -42,4 +54,4 @@ endpoints:
       - allow: { method: POST, path: "/chat/completions" }
 # Openrind Shell launches both agents through fixed native entrypoints. The
 # generic Node interpreter used by OpenClaw is intentionally excluded.
-binaries: [/usr/bin/claude, /usr/local/bin/claude, /usr/local/bin/claude-real, /usr/local/bin/openrind-openclaw-agent, /usr/local/bin/openrind-openhands-agent]
+binaries: [/usr/bin/claude, /usr/local/bin/claude, /usr/local/bin/claude-real, /usr/local/bin/openrind-openclaw-agent, /usr/local/bin/openrind-openhands-agent, /usr/bin/node]

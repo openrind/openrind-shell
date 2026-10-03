@@ -1,4 +1,9 @@
 import { Capabilities, BrowserFault } from '@openrind/browser-contract';
+import { createLocalChromiumProvider } from './local-chromium.mjs';
+import { createBrowserbaseProvider } from './browserbase.mjs';
+
+export { createLocalChromiumProvider, createBrowserbaseProvider };
+
 export function providerRegistry(providers = []) {
   const registry = new Map();
   for (const provider of providers) {
@@ -9,5 +14,9 @@ export function providerRegistry(providers = []) {
   }
   return registry;
 }
-// Deliberately no installed providers yet. A fixture is never a production fallback.
-export const installedProviders = Object.freeze([]);
+
+export const installedProviders = Object.freeze(
+  process.env.OPENRIND_ENABLE_LOCAL_PROVIDER === '1'
+    ? [createLocalChromiumProvider(), createBrowserbaseProvider()]
+    : []
+);

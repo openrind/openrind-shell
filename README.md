@@ -448,6 +448,18 @@ and fix the datasource or daemon failure. A sandbox in the `Error` phase cannot 
 started; delete it and recreate it with the same `OPENRIND_SHELL_WORKSPACE_ID` to
 remount the volume.
 
+## Browser Agent Support
+
+Openrind Shell includes built-in browser automation tools for Claude Code and custom agents:
+
+- **19 Structured Web Tools**: `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_select`, `browser_press`, `browser_scroll`, `browser_screenshot`, `browser_upload_file`, `browser_downloads`, `browser_take_control`, `browser_resume`, `browser_close`, and client-local `browser_import_file` / `browser_save_artifact`.
+- **Three Browser Providers**:
+  1. `local-chromium`: Dedicated Chromium browser managed via Playwright.
+  2. `browserbase`: Scalable cloud browser automation via Browserbase session CDP.
+  3. `desktop-webview`: Interactive live page embedded inside the Desktop right-sidebar panel.
+- **Human Handoff**: When a page requires manual authentication (2FA, CAPTCHA, single sign-on), click **Take Control** in the sidebar. AI actions are fenced until you click **Resume AI**, safely protecting credentials and maintaining clean session state.
+- **Durable File Artifacts**: Screenshots and downloaded files are saved directly into the FUSE-backed `/sandbox/work` mount.
+
 Architecture and security details are in [ARCHITECTURE.md](./ARCHITECTURE.md). The
 alternatives survey and implementation contract are [FUSE.md](./FUSE.md) and
 [FUSE-DESIGN.md](./FUSE-DESIGN.md).
