@@ -288,7 +288,7 @@ async function checkDockerInDistro() {
   try {
     const r = await wslRun(
       ["-d", DISTRO_NAME, "--", "docker", "info", "--format", "{{json .}}"],
-      { timeout: 10_000 },
+      { timeout: 25_000 },
     );
     if (r.exitCode !== 0) {
       return {
@@ -331,7 +331,7 @@ async function checkOpenShellCli() {
   try {
     const r = await wslRun(
       ["-d", DISTRO_NAME, "--", "openshell", "version", "--json"],
-      { timeout: 10_000 },
+      { timeout: 25_000 },
     );
     if (r.exitCode !== 0) {
       // Some releases moved version under `--version` instead of a
@@ -340,7 +340,7 @@ async function checkOpenShellCli() {
       // "binary present but CLI surface changed".
       const fallback = await wslRun(
         ["-d", DISTRO_NAME, "--", "openshell", "--version"],
-        { timeout: 10_000 },
+        { timeout: 25_000 },
       ).catch(() => null);
       if (fallback && fallback.exitCode === 0) {
         const v = fallback.stdout.match(/(\d+\.\d+(?:\.\d+)?)/)?.[1] ?? fallback.stdout.trim();
@@ -393,7 +393,7 @@ async function checkDiskUsage() {
   try {
     const r = await wslRun(
       ["-d", DISTRO_NAME, "--", "df", "-B1", "--output=avail,size", "/"],
-      { timeout: 10_000 },
+      { timeout: 25_000 },
     );
     if (r.exitCode !== 0) {
       return {
@@ -583,7 +583,7 @@ async function checkOpenShellGateway() {
   try {
     const json = await wslRun(
       ["-d", DISTRO_NAME, "--", "openshell", "status", "--json"],
-      { timeout: 10_000, user: "banker" },
+      { timeout: 25_000, user: "banker" },
     );
     if (json.exitCode === 0) {
       const parsed = parseJsonSafely(json.stdout);
@@ -735,25 +735,35 @@ function deriveFatal(components) {
     .map((c) => `${c.label}: ${c.detail}`);
 }
 
+let inFlightDoctor = null;
+
 /** @returns {Promise<OpenShellDoctorResult>} */
 export async function openshellDoctor() {
-  const components = [
-    await checkWindows(),
-    await checkHyperV(),
-    await checkWsl(),
-    await checkDistro(),
-    await checkDockerInDistro(),
-    await checkOpenShellCli(),
-    await checkOpenShellGateway(),
-    await checkDiskUsage(),
-    await checkOrphans(),
-  ];
-  return {
-    status: aggregateStatus(components),
-    components,
-    actionable: deriveActionable(components),
-    fatal: deriveFatal(components),
-  };
+  if (inFlightDoctor) return inFlightDoctor;
+  inFlightDoctor = (async () => {
+    try {
+      const components = [
+        await checkWindows(),
+        await checkHyperV(),
+        await checkWsl(),
+        await checkDistro(),
+        await checkDockerInDistro(),
+        await checkOpenShellCli(),
+        await checkOpenShellGateway(),
+        await checkDiskUsage(),
+        await checkOrphans(),
+      ];
+      return {
+        status: aggregateStatus(components),
+        components,
+        actionable: deriveActionable(components),
+        fatal: deriveFatal(components),
+      };
+    } finally {
+      inFlightDoctor = null;
+    }
+  })();
+  return inFlightDoctor;
 }
 
 // Exported for testing — lets the suite verify aggregation independently of
