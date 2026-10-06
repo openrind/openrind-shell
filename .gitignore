@@ -17,6 +17,8 @@ AGENTS.md
 !.claude/skills/openrind-navigate/**
 !.claude/skills/openrind-shell/
 !.claude/skills/openrind-shell/**
+!.claude/skills/openrind-browser/
+!.claude/skills/openrind-browser/**
 !.claude/skills/excel-report/
 !.claude/skills/excel-report/**
 

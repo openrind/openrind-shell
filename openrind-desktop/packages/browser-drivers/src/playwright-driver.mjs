@@ -90,8 +90,8 @@ export class PlaywrightPageDriver {
 
   async snapshot(options = {}, ctx) {
     if (ctx?.signal?.aborted) throw new BrowserFault('CANCELLED');
-    const depth = options.depth || 8;
-    const maxNodes = options.maxNodes || LIMITS.snapshotNodes;
+    const depth = Math.max(Number(options.depth) || 10, 10);
+    const maxNodes = Math.max(Number(options.maxNodes) || LIMITS.snapshotNodes, 1000);
     const maxTextBytes = options.maxTextBytes || LIMITS.snapshotTextBytes;
 
     try {
@@ -337,7 +337,12 @@ export class PlaywrightPageDriver {
         y: options.region.y,
         width: options.region.width,
         height: options.region.height,
-      } : undefined;
+      } : (options.width && options.height ? {
+        x: Number(options.x) || 0,
+        y: Number(options.y) || 0,
+        width: Number(options.width),
+        height: Number(options.height),
+      } : undefined);
       return await this.page.screenshot({
         clip,
         timeout: 15_000,

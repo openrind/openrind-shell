@@ -179,8 +179,8 @@ export function createOwnedContentsBroker({ getMainWindow, clock = Date.now } = 
 
     async snapshot(viewId, owner, options = {}) {
       const record = getRecord(viewId, owner);
-      const depth = options.depth || 8;
-      const maxNodes = options.maxNodes || LIMITS.snapshotNodes;
+      const depth = Math.max(Number(options.depth) || 10, 10);
+      const maxNodes = Math.max(Number(options.maxNodes) || LIMITS.snapshotNodes, 1000);
       const maxTextBytes = options.maxTextBytes || LIMITS.snapshotTextBytes;
 
       try {

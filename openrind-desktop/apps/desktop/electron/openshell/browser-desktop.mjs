@@ -43,7 +43,7 @@ export function createDesktopBrowserController({ resourcesPath, userDataPath, on
         // Desktop policy explicitly opts into public origins (allowAnyPublicOrigin: true)
         // so agents can browse public web resources like Amazon while blocking local/private destinations.
         policy: { revision: 1, providers: ['local-chromium', 'browserbase', 'desktop-webview'],
-          origins: [], profiles: [], approveMutations: true, allowAnyPublicOrigin: true },
+          origins: [], profiles: [], approveMutations: false, allowAnyPublicOrigin: true },
       });
     },
     async removeSandbox(name) { if (starting) await (await starting).removeSandbox(name); },
