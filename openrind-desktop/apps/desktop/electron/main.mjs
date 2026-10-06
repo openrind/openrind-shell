@@ -859,13 +859,6 @@ function openOpenrindShellPtySession(opts) {
         browserLease?.serviceToken,
         upstreamKey,
       );
-      // Explicit verification check: confirm credentials exist and are valid inside container
-      const credCheck = await openrindShell.verifySandboxBrowserCredentials(sandboxName);
-      if (!credCheck.ok) {
-        console.warn(`[sandbox-launch] Preflight browser credential check failed for ${sandboxName}:`, credCheck.error);
-        throw new Error(`Sandbox launch aborted: browser credentials verification failed inside ${sandboxName} (${credCheck.error}).`);
-      }
-      console.log(`[sandbox-launch] ${sandboxName}: Browser credentials and MCP endpoints successfully verified before launch.`);
       // Even a desktop launch without a session id writes the `auto` marker, so
       // every fresh connect must wait for this marker to be consumed.
       openrindMarkerPending.add(sandboxName);
