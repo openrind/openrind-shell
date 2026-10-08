@@ -222,6 +222,29 @@ check capture counters before claiming a trace exists. Desktop cleanup closes
 agents and revokes scoped providers before it removes a sandbox. Use that managed
 cleanup for Desktop-owned resources.
 
+## OTLP Capture Foundation
+
+`openrind-desktop/packages/capture` is a standalone JavaScript producer library.
+It uses standard OTel SDK records and upstream OTLP protobuf transport. Existing
+Desktop Haloop routes still use their current capture path; this library is not
+automatically attached to agents, browser relays, FUSE, or judges.
+
+```mermaid
+flowchart LR
+  application["Instrumented application"] --> sdk["OTel SDK<br/>spans, byte logs, health metrics"]
+  sdk --> queue["Bounded memory queues<br/>visible rejection and export errors"]
+  queue --> receiver["Configured OTLP/HTTP receiver"]
+  receiver -.-> storage["Persistent Haloop ingestion<br/>separate integration work"]
+```
+
+The package validates parent trace context, splits large payloads into hashed
+chunks, and reports partial or uncertain acceptance. Its retry buffer is memory
+only. Successful export never marks persistent acceptance or run completeness.
+The real collector fixture verifies a 17 MiB payload and all three signals.
+It does not exercise OpenShell proxy policy or the private Haloop deployment.
+See [BUILD.md](./BUILD.md#otlp-capture-library-tests) for the tests and
+[package status](./openrind-desktop/packages/capture/README.md) for remaining work.
+
 ## Experimental Browser Pods
 
 This is a separate browser runtime, not a new persistence path. Kernel and

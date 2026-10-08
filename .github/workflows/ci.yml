@@ -28,6 +28,11 @@ jobs:
       - name: Desktop OpenShell tests
         working-directory: openrind-desktop/apps/desktop
         run: pnpm test:openshell
+      - name: OTLP unit and collector interoperability tests
+        working-directory: openrind-desktop
+        run: |
+          pnpm --filter @openrind/capture test
+          pnpm --filter @openrind/capture test:collector
       - name: Browser-pod unit and local transport tests
         working-directory: openrind-desktop
         run: |

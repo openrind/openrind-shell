@@ -482,6 +482,7 @@ schema remain for compatibility. Do not rename stored tables to match branding.
 
 - [BUILD.md](./BUILD.md): source setup, image builds, test commands, and host provisioning.
 - [ARCHITECTURE.md](./ARCHITECTURE.md): implemented lifecycle, security, and durability.
+- [Capture library status](./openrind-desktop/packages/capture/README.md): standalone OTLP telemetry and its limits; not active in customer sessions.
 - [Browser package status](./openrind-desktop/packages/browser-pods/README.md): test evidence and remaining release requirements.
 - [BROWSER-PODS.md](./BROWSER-PODS.md): target design; not a list of shipped capabilities.
 - [Desktop integration](./openrind-desktop/apps/desktop/OPENRIND_SHELL.md): managed gateway, Haloop, and terminal details.

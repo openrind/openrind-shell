@@ -67,6 +67,30 @@ If a GHCR pull is denied, check the exact image name, Docker context, and regist
 credentials. Do not remove a user's registry login without approval. Do not
 rebuild NVIDIA's Community base to work around image resolution.
 
+## OTLP Capture Library Tests
+
+The standalone `@openrind/capture` package emits application telemetry through
+standard OTLP/HTTP protobuf. It is not enabled in customer Desktop sessions.
+Use Node.js 22.19 or later and the Desktop workspace's pinned pnpm version.
+
+```bash
+cd openrind-desktop
+pnpm install --frozen-lockfile
+pnpm --filter @openrind/capture test
+pnpm --filter @openrind/capture test:collector
+```
+
+Unit tests use local HTTP fixtures. The collector test needs a local Linux
+Docker daemon. It starts a digest-pinned OpenTelemetry Collector, verifies all
+three signals, reconstructs a 17 MiB byte payload, and removes its own resources.
+It needs no database, model key, OpenShell gateway, or NVIDIA image build.
+
+A passing collector test proves wire interoperability only. It does not prove
+OpenShell policy routing, Haloop persistence, or completion of a capture profile.
+See the [capture package](./openrind-desktop/packages/capture/README.md) for API
+and failure semantics. Do not point it at the existing private JSON ingestion
+endpoint and assume that endpoint supports OTLP.
+
 ## Windows Desktop Source Setup
 
 The managed OpenShell installer targets Windows 11 and creates a dedicated WSL2
