@@ -27,7 +27,10 @@ const ownerImage = testCtfFuse
   ? (process.env.CTF_FUSE_OWNER_IMAGE || 'openrind-shell-fuse-browser-ctf:test')
   : (process.env.BROWSER_OWNER_IMAGE || 'openrind-browser-owner:e2e');
 const podImage = process.env.BROWSER_POD_IMAGE || 'openrind-browser-pod:e2e';
-const ctfImage = process.env.CTF_CHALLENGE_IMAGE || 'openrind-ctf-challenge:e2e';
+const ctfImages = {
+  'flag-command': process.env.CTF_FLAG_COMMAND_IMAGE || 'openrind-ctf-flag-command:e2e',
+  'glacier-exchange': process.env.CTF_GLACIER_EXCHANGE_IMAGE || 'openrind-ctf-glacier-exchange:e2e',
+};
 const ctfModel = process.env.OPENRIND_CTF_MODEL || 'openai/gpt-4o-mini';
 const state = await mkdtemp(join(tmpdir(), 'openrind-browser-live-'));
 const tag = randomBytes(4).toString('hex');
@@ -178,7 +181,7 @@ async function startCtfChallenge({ id, index, bridge, image }) {
   const token = randomBytes(32).toString('base64url');
   const policyPath = join(state, `${id}-policy.json`);
   const policy = { version: 1, filesystem_policy: { include_workdir: true,
-    read_only: ['/usr', '/lib', '/etc', '/opt', '/proc', '/dev/urandom'], read_write: ['/sandbox', '/tmp', '/dev/null'] },
+    read_only: ['/usr', '/lib', '/etc', '/opt', '/flag.txt', '/proc', '/dev/urandom'], read_write: ['/sandbox', '/tmp', '/dev/null'] },
     landlock: { compatibility: 'best_effort' }, process: { run_as_user: 'sandbox', run_as_group: 'sandbox' } };
   await writeFile(policyPath, JSON.stringify(policy), { mode: 0o600 });
   await os(['sandbox', 'create', '--name', name, '--from', image, '--policy', policyPath,
@@ -192,7 +195,12 @@ async function startCtfChallenge({ id, index, bridge, image }) {
     const response = await fetch(`http://${bridge}:${port}/health`, { signal: AbortSignal.timeout(1000) });
     assert.equal(response.status, 200);
   });
-  const challenge = { id, task: publicTask(task), name, port, token, forward,
+  const page = await fetch(`http://${bridge}:${port}${task.sitePath}`, { signal: AbortSignal.timeout(5000) });
+  assert.equal(page.status, 200, `${id} benchmark page did not start`);
+  const pageHtml = await page.text();
+  assert.match(pageHtml, id === 'flag-command' ? /<title>Flag Command<\/title>/ : /<title>GlacierExchange<\/title>/,
+    `${id} did not serve the upstream benchmark application`);
+  const challenge = { id, task: publicTask(task), browserRules: task.browserRules, name, port, token, forward,
     endpoint: `http://host.openshell.internal:${port}`, bridgeAddress: bridge };
   ctfChallenges.push(challenge);
   return challenge;
@@ -268,7 +276,10 @@ try {
   }
   if (testCtf) {
     assert.ok(process.env.OPENROUTER_API_KEY?.trim(), '--ctf requires OPENROUTER_API_KEY');
-    await run('docker', ['image', 'inspect', ctfImage]);
+    for (const [id, image] of Object.entries(ctfImages)) {
+      await run('docker', ['image', 'inspect', image]);
+      evidence[`${id}Image`] = image;
+    }
   }
   await run('docker', ['image', 'inspect', ownerImage]);
   const podDigest = await run('docker', ['image', 'inspect', '--format', '{{.Id}}', podImage]);
@@ -319,9 +330,9 @@ supervisor_bin = "${binaryDir}/openshell-sandbox"
   pass('isolated vendored gateway ready');
   if (testCtf) {
     for (const [index, id] of ['flag-command', 'glacier-exchange'].entries()) {
-      await startCtfChallenge({ id, index, bridge, image: ctfImage });
+      await startCtfChallenge({ id, index, bridge, image: ctfImages[id] });
     }
-    pass('two Openrind-native CTF challenge services are ready in separate sandboxes');
+    pass('two upstream benchmark Flask apps are ready in separate OpenShell sandboxes');
   }
   binding = browserPodBinding({ endpoint: 'http://host.openshell.internal:19301', bridgeAddress: bridge, bindingId: tag });
   await writeFile(join(state, 'profile.json'), JSON.stringify(binding.profile), { mode: 0o600 });
@@ -348,9 +359,10 @@ supervisor_bin = "${binaryDir}/openshell-sandbox"
   }
   const owner = JSON.parse(await os(['sandbox', 'get', ownerName, '-o', 'json']));
   const config = { listen: { host: bridge, port: 19301 }, runtime: { binary, gateway: endpoint,
-    image: podDigest, stateDir: join(state, 'broker'), websiteHosts: ['example.com'],
-    ...(testCtf ? { challengeEndpoints: ctfChallenges.map(({ port, bridgeAddress }) =>
-      ({ host: 'host.openshell.internal', port, bridgeAddress })) } : {}), acceptNoSandbox: true },
+    image: podDigest, stateDir: join(state, 'broker'),
+    websiteHosts: testCtf ? ['example.com', 'cdn.jsdelivr.net', 'cdn.amcharts.com', 'cdnjs.cloudflare.com'] : ['example.com'],
+    ...(testCtf ? { challengeEndpoints: ctfChallenges.map(({ port, bridgeAddress, browserRules }) =>
+      ({ host: 'host.openshell.internal', port, bridgeAddress, rules: browserRules })) } : {}), acceptNoSandbox: true },
     owners: [{ serviceToken: token, owner: { id: owner.id, generation: 'openshell-e2e', workspaceId: testCtfFuse ? fuseWorkspaceId : tag,
       helperOrigin: 'http://127.0.0.1:19300', providers: testHyperbrowser || testArgide ? ['kernel', 'hyperbrowser'] : ['kernel'],
       ...(testHyperbrowser || testArgide ? { compatibilityProfile: 'argide-0.91-browser-pods-v1' } : {}) } }] };

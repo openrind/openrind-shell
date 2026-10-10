@@ -21,8 +21,15 @@ export function browserPolicy(hosts, challengeEndpoints = []) {
     requireThat(challengeEndpoint?.host === 'host.openshell.internal' &&
       Number.isInteger(challengeEndpoint.port) && challengeEndpoint.port >= 1024 && challengeEndpoint.port <= 65535 &&
       isIP(challengeEndpoint.bridgeAddress) === 4 &&
-      /^(?:10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.)/.test(challengeEndpoint.bridgeAddress),
+      /^(?:10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.)/.test(challengeEndpoint.bridgeAddress) &&
+      Array.isArray(challengeEndpoint.rules) && challengeEndpoint.rules.length > 0 && challengeEndpoint.rules.length <= 64,
     'INVALID_CHALLENGE_ENDPOINT');
+    for (const rule of challengeEndpoint.rules) {
+      requireThat(['GET', 'HEAD', 'POST'].includes(rule?.method) && typeof rule.path === 'string' &&
+        rule.path.length <= 256 && (rule.path === '/' || /^\/[A-Za-z0-9_.\/-]+(?:\/\*\*)?$/.test(rule.path)) &&
+        !rule.path.includes('..') && (!rule.path.includes('*') || rule.path.endsWith('/**')),
+      'INVALID_CHALLENGE_ROUTE');
+    }
   }
   const policy = { version: 1, filesystem_policy: { include_workdir: false,
     read_only: ['/usr', '/lib', '/etc', '/opt', '/proc', '/dev/urandom', '/sandbox'],
@@ -35,8 +42,8 @@ export function browserPolicy(hosts, challengeEndpoints = []) {
     policy.network_policies.challenge = { name: 'ctf-challenge-website',
       endpoints: endpoints.map(challengeEndpoint => ({ host: challengeEndpoint.host, port: challengeEndpoint.port,
         protocol: 'rest', tls: 'none', allowed_ips: [`${challengeEndpoint.bridgeAddress}/32`],
-        enforcement: 'enforce', rules: ['GET', 'HEAD', 'POST'].map(method =>
-          ({ allow: { method, path: '/site/**' } })) })),
+        enforcement: 'enforce', rules: challengeEndpoint.rules.map(({ method, path }) =>
+          ({ allow: { method, path } })) })),
       binaries: [{ path: CHROMIUM_BINARY }] };
   }
   return policy;

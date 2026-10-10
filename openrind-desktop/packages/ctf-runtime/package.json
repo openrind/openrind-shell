@@ -6,6 +6,7 @@
   "engines": { "node": ">=22.19.0" },
   "scripts": {
     "test": "node --test test/*.test.mjs",
+    "test:images": "node test/live/container-apps.mjs",
     "test:openshell": "node ../browser-pods/test/live/openshell-e2e.mjs --ctf"
   }
 }

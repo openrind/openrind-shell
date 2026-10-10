@@ -75,23 +75,28 @@ customer Desktop runtime. Keep those test results separate.
 
 ## Run Browser CTF Tasks
 
-The experimental CTF runtime has two self-contained challenge services. They
-run in separate OpenShell challenge sandboxes. A custom Openrind agent uses the
-unchanged `agent-browser` Kernel provider to drive Chromium in a browser pod.
-It records model requests, model actions, tool observations, and a separate flag
-judge result. These are complete, runnable task fixtures in this repository.
-They are independent implementations based on the named challenge families;
-they are not copies of the full upstream benchmark repositories. The runtime
-does not run Cyber-Zero, EnIGMA, Docker-in-Docker, or a simulated terminal.
+The experimental CTF runtime runs two actual browser tasks from the Cybench
+benchmark. Each OpenShell challenge sandbox runs the original Flask app and
+assets. Openrind adds a request proxy, per-run event log, and separate flag
+judge. The proxy does not reimplement the challenge routes. The runtime does
+not run Cyber-Zero's agent, EnIGMA, Docker-in-Docker, or a simulated terminal.
 
 | Task ID | Challenge basis | Required browser work |
 |---|---|---|
-| `flag-command` | Cybench HTB `Flag Command` | Read same-origin page code and call its hidden command API. |
-| `glacier-exchange` | Cybench GLA `GlacierExchange` | Read supplied wallet code and use the guided floating-point precision exploit. |
+| `flag-command` | Cybench HTB `Flag Command` | Inspect the original page and its API to retrieve the flag. |
+| `glacier-exchange` | Cybench GLA `GlacierXchange` | Use the original exchange app to satisfy the Glacier Club check. |
 
-The task implementations, agent, image recipe, unit tests, and live runner are
-in this checkout. A developer does not need a Cyber-Zero checkout, an EnIGMA
-image, Compose, or a benchmark archive.
+The runnable task files are in
+[`sandboxes/ctf-challenge/tasks/`](./sandboxes/ctf-challenge/tasks/). They come
+from Cyber-Zero commit `e0c4493ac27dd3a8c96e524c3966c3927261c625`. The repo
+includes only the two task applications, required assets, and their flags. It
+does not include the benchmark runner, EnIGMA, solutions, writeups, or task
+metadata. Each challenge image contains one app and one flag. A developer does
+not need a separate Cyber-Zero checkout or Compose.
+
+The Cyber-Zero source repository uses CC BY-NC 4.0. The original challenge
+authors may hold additional rights. Review the included license and source
+record before commercial use or redistribution.
 
 ### CTF Runtime Architecture
 
@@ -110,7 +115,7 @@ flowchart LR
   subgraph pods["Separate OpenShell pods"]
     browser["Browser pod<br/>headless Chromium"]
     challenge["Challenge pod<br/>site + judge + run events"]
-    browser -->|"/site/** only"| challenge
+    browser -->|"task-specific public routes only"| challenge
   end
   model["OpenRouter model API"]
   pg[("Local TLS PostgreSQL<br/>--ctf-fuse only")]
@@ -121,10 +126,11 @@ flowchart LR
 ```
 
 The owner, browser, and challenge are separate OpenShell sandboxes. The browser
-pod can reach the public challenge site at `/site/**`; it cannot reach the judge
-or event-export routes. The owner can submit a flag and export only the events
-for its run. The judge decides whether the flag is correct. Model requests go
-directly to OpenRouter, not through Haloop.
+opens the actual app at `/`. The browser policy allows only that task's public
+page, assets, and API routes. It cannot reach `/v1/submit` or `/v1/events`. The
+owner can submit a flag and export only events for its run. The judge decides
+whether the flag is correct. Model requests go directly to OpenRouter, not
+through Haloop.
 
 The agent writes a trajectory, agent events, and a run-scoped challenge-event
 export under `/sandbox/work/ctf`. In regular `--ctf` mode, that path is an
@@ -135,28 +141,26 @@ it with the same workspace ID, and compares all six file hashes. This is a
 developer persistence test. It is not Desktop activation, customer workspace
 validation, Haloop capture, or a general CTF benchmark score.
 
-Start with the package unit test. It verifies both browser sites, the exploit
-path, and the independent judges without a model key. Then use the live runner
-on Linux x64 with local Docker and `OPENROUTER_API_KEY`. The regular mode uses a
-temporary non-FUSE owner. The `--ctf-fuse` mode uses a disposable primary FUSE
-owner and a local PostgreSQL fixture to test persistence across owner
-delete/recreate. Neither mode uses Desktop or a customer sandbox.
+Start with the package unit test. It checks task metadata, proxy behavior,
+event attribution, and judge isolation. Build both task images, then run the
+package's `test:images` script to solve each original Flask app and check its
+judge without a model key. Then use the live runner on Linux x64 with local
+Docker and `OPENROUTER_API_KEY`. That test starts both original apps in
+separate OpenShell sandboxes and runs the model agent through Chromium. The
+regular mode uses a temporary non-FUSE owner. The
+`--ctf-fuse` mode uses a disposable primary FUSE owner and local PostgreSQL to
+test persistence across owner delete/recreate. Neither mode uses Desktop or a
+customer sandbox.
 
 Follow [Openrind CTF Runtime](./openrind-desktop/packages/ctf-runtime/README.md)
 for exact commands. Use the `openrind-ctf` skill when Codex runs this path.
 
-A model run is successful only when its trajectory and the separate challenge
-judge both show an accepted flag. The fixture never inserts a known flag or
-claims a model action that the browser tool did not run. Model quality can cause
-a valid runtime test to end with an unaccepted flag. FUSE mode also requires the
-local TLS PostgreSQL fixture and `/dev/fuse`. The CTF agent still calls OpenRouter
-directly. It has no working Haloop mode or CTF OTLP producer. See the package
-guide and `openrind-ctf` skill for setup and evidence limits.
-
-The FUSE-backed fixture passed on Linux x64: both judges accepted, and the
-trajectory, agent-event, and per-run challenge-event files for both tasks had
-matching hashes after owner recreation. This proves the tested local path only.
-It does not prove Desktop integration or Haloop capture.
+A model run passes only when the separate challenge judge accepts the flag.
+The harness does not insert flags or replace browser actions. A model can fail
+to solve a valid task. FUSE mode also requires the local TLS PostgreSQL fixture
+and `/dev/fuse`. The CTF agent calls OpenRouter directly. It has no working
+Haloop mode or CTF OTLP producer. See the package guide and `openrind-ctf` skill
+for setup and test limits.
 
 ## Start Claude In Desktop
 

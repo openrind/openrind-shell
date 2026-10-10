@@ -84,6 +84,12 @@ sandboxes
 !sandboxes/openeral/**
 !sandboxes/ctf-challenge/
 !sandboxes/ctf-challenge/Dockerfile
+!sandboxes/ctf-challenge/tasks/
+!sandboxes/ctf-challenge/tasks/**
+!sandboxes/ctf-challenge/tasks/flag-command/
+!sandboxes/ctf-challenge/tasks/flag-command/**
+!sandboxes/ctf-challenge/tasks/glacier-exchange/
+!sandboxes/ctf-challenge/tasks/glacier-exchange/**
 sandboxes/openeral/skills
 vendor
 openeral-js/node_modules

@@ -982,16 +982,26 @@ docker build --pull=false \
   -t openrind-shell-fuse-browser-ctf:test .
 ```
 
-Build the browser pod and challenge images. Use the pinned Chromium package from
-the Real Linux Browser Test above:
+Build the browser pod and one challenge image for each original task. Use the
+pinned Chromium package from the Real Linux Browser Test above:
 
 ```bash
 docker build --pull=false -f sandboxes/browser-pod/Dockerfile \
   --build-arg CHROMIUM_VERSION=154.0.8037.92-1~deb12u1 \
   -t openrind-browser-pod:e2e sandboxes/browser-pod
 docker build --pull=false -f sandboxes/ctf-challenge/Dockerfile \
-  -t openrind-ctf-challenge:e2e .
+  --build-arg TASK_ID=flag-command \
+  -t openrind-ctf-flag-command:e2e .
+docker build --pull=false -f sandboxes/ctf-challenge/Dockerfile \
+  --build-arg TASK_ID=glacier-exchange \
+  -t openrind-ctf-glacier-exchange:e2e .
+
+pnpm --dir openrind-desktop/packages/ctf-runtime test:images
 ```
+
+This model-free test runs the original app in each image. It checks the public
+task routes, successful task result, separate judge, and event export. It does
+not test OpenShell or the browser agent.
 
 Set `DATABASE_URL` and `OPENROUTER_API_KEY` in the shell. Use
 `openrind-shell-fuse-browser-ctf:test` as the owner image. This test-only overlay
@@ -1013,8 +1023,8 @@ node openrind-desktop/packages/browser-pods/test/live/openshell-e2e.mjs --ctf-fu
 The runner uses `DATABASE_URL` and `OPENROUTER_API_KEY` from the environment. It
 writes the database URL to a mode-0600 temporary upload file and removes it and
 the host-side model-key files during cleanup. It does not print their values.
-GlacierExchange includes a guided exploit hint. The test checks browser execution,
-the independent judge, and FUSE persistence. It does not measure model skill.
+The test runs both original Flask apps through the browser pod and requires the
+independent judge to accept each result. A model can fail to solve a valid task.
 For a reasoning model that supports OpenRouter's reasoning setting, set
 `OPENRIND_CTF_REASONING_EFFORT=low` if it uses the full response budget before
 it returns the required JSON action. Do not set this option for unsupported
