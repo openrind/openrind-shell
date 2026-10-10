@@ -49,6 +49,14 @@ function copyExecutableTargetToAlias(sidecarsDir, targetName, aliasName) {
 }
 
 async function afterPack(context) {
+  const resourceRoot = context.electronPlatformName === "darwin"
+    ? path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, "Contents", "Resources")
+    : path.join(context.appOutDir, "resources");
+  const archive = path.join(resourceRoot, "app.asar");
+  const files = require("@electron/asar").listPackage(archive);
+  if (!files.includes("/electron/generated/runtime-diagnostics.cjs")) {
+    throw new Error("The packaged diagnostic producer is missing. Run the Desktop build before packaging.");
+  }
   const triple = targetTriple(context.electronPlatformName, context.arch);
   if (!triple) return;
 

@@ -3,8 +3,8 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/index.mjs" },
-  "engines": { "node": ">=22.19.0" },
+  "exports": { ".": "./src/index.mjs", "./diagnostics": "./src/diagnostics.mjs" },
+  "engines": { "node": ">=22.16.0" },
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "test:collector": "node test/live/collector.mjs"

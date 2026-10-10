@@ -69,7 +69,7 @@ export function createSignalExporter({ signal, endpoint, headers, timeoutMillis,
         return {};
       }
     },
-  }, `openrind_otlp_${signal}`, helper);
+  }, `openrind_otlp_${signal}`, helper, undefined);
 
   return {
     encode: (items) => serializer.serializeRequest(items),

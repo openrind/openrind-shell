@@ -27,6 +27,22 @@ For Windows source setup, BUILD's **Windows Desktop Source Setup** lists the
 required rootfs and external Haloop source. Stop and report missing assets.
 Do not follow historical Tauri setup or change branches to obtain an older flow.
 
+### Capture And Diagnostics
+
+For OTLP work, use `openrind-capture` and BUILD's **OTLP Capture Library Tests**.
+The key-free host fixture needs no OpenShell build or PostgreSQL. Desktop has a
+managed route client for lifecycle spans and sampled FUSE health. The supplied
+Haloop release has no matching receiver. Environment variables do not activate
+Desktop export. Test the lazy bundle with `test:diagnostics:electron`; it uses
+Electron's Node runtime and an isolated ASAR. This is not a full installer test.
+FUSE counters contain no paths or contents. Full browser/file evidence and
+durable Haloop ingestion are not implemented.
+
+Keep export off the FUSE request path. Never add a watcher, second database
+connection, or TLS bypass for telemetry. Export failure must not change storage
+results. Run Rust tests for counters, Desktop tests for polling, and the Collector
+fixture for wire interoperability. None proves Windows Desktop with live FUSE.
+
 ### Choose A Browser Test
 
 These commands run on the Linux host, not inside an existing customer owner.
@@ -38,12 +54,22 @@ Complete the public test setup before adding either SDK or private Argide input.
 | Configured Hyperbrowser SDK | [Hyperbrowser SDK Test](../../../BUILD.md#hyperbrowser-sdk-test); `--hyperbrowser` | Rebuilt SDK-capable fixture images; no keys | 26 checks and `hyperbrowser.json` |
 | Actual Argide browser module | [Argide guide](../../../openrind-desktop/packages/browser-pods/test/live/argide/README.md); `--argide` | Pinned private kit and derived owner image; no model key | 23 checks and `argide.json` |
 | Actual Argide widget and model | Same Argide guide; `--argide --argide-widget` | Same kit plus isolated host backend and funded Gemini key | 28 checks, `argide-widget.json`, and `argide-widget.png` |
-| Openrind browser CTF runtime | [CTF Runtime](../../../openrind-desktop/packages/ctf-runtime/README.md); use `openrind-ctf` | Linux x64 and local Docker; a model evaluation also needs `OPENROUTER_API_KEY` | Service tests pass, then each model run has a judge-backed result |
+| Openrind browser CTF runtime | [CTF Runtime](../../../openrind-desktop/packages/ctf-runtime/README.md); use `openrind-ctf` | Linux x64 and local Docker; model run needs `OPENROUTER_API_KEY`; FUSE mode also needs local TLS PostgreSQL and `/dev/fuse` | Judge-backed result; `--ctf-fuse` also checks capture hashes after owner recreation |
 
 Each count includes the Kernel checks. Do not add the counts or combine flags
 to claim the same receipt. Every mode also requires exit code 0,
 `result: passed`, and no `cleanupError`. If the private kit is missing, report
 that limit. Do not silently substitute the SDK fixture for actual Argide.
+
+The standard `--ctf` live test uses a non-FUSE owner. Use `--ctf-fuse` to run
+the real agent and both browser challenges in a primary FUSE owner. That mode
+flushes the trajectory and event files, recreates the owner with the same
+workspace, and checks that all file hashes match. It does not prove Haloop
+capture or Desktop integration. The runner creates its own disposable owner,
+browser pods, and challenge pods. Do not point it at an existing customer
+sandbox. The CTF agent sends model requests directly to OpenRouter; it is not a
+managed Haloop agent. Follow `openrind-ctf` for the run procedure and evidence
+checks.
 
 ## Runtime Architecture
 

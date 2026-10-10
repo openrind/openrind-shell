@@ -26,9 +26,37 @@ function writeJson(res, status, value) {
   res.end(JSON.stringify(value));
 }
 
+const RUN_ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
+const MAX_RUN_EVENT_LOGS = 64;
+const MAX_RUN_EVENT_BYTES = 384 * 1024;
+const MAX_TOTAL_EVENT_BYTES = 2 * 1024 * 1024;
+
 export function createChallengeServer({ task, judgeToken, record = async () => {} }) {
   if (!/^[A-Za-z0-9_-]{43}$/.test(judgeToken)) throw new Error('INVALID_JUDGE_TOKEN');
   const expected = createHash('sha256').update(`Bearer ${judgeToken}`).digest();
+  const eventLogs = new Map();
+  let totalEventBytes = 0;
+  let eventActorCapacityExceeded = false;
+  async function recordEvent(event) {
+    await record(event);
+    if (!RUN_ID_PATTERN.test(event.actor ?? '')) return;
+    let log = eventLogs.get(event.actor);
+    if (!log) {
+      if (eventLogs.size >= MAX_RUN_EVENT_LOGS) {
+        eventActorCapacityExceeded = true;
+        return;
+      }
+      log = { events: [], bytes: 0, truncated: false };
+      eventLogs.set(event.actor, log);
+    }
+    const bytes = Buffer.byteLength(JSON.stringify(event));
+    if (log.events.length < 512 && log.bytes + bytes <= MAX_RUN_EVENT_BYTES &&
+        totalEventBytes + bytes <= MAX_TOTAL_EVENT_BYTES) {
+      log.events.push(event);
+      log.bytes += bytes;
+      totalEventBytes += bytes;
+    } else log.truncated = true;
+  }
   const server = http.createServer(async (req, res) => {
     const started = performance.now();
     try {
@@ -37,18 +65,20 @@ export function createChallengeServer({ task, judgeToken, record = async () => {
       if (req.method === 'GET' && url.pathname === '/health') { writeJson(res, 200, { state: 'ready', task: task.id }); return; }
       const cookies = parseCookies(req.headers.cookie);
       const sessionId = cookies.openrind_ctf_session ?? randomBytes(18).toString('base64url');
-      const actor = cookies.openrind_ctf_run ?? url.searchParams.get('run') ?? req.headers['x-openrind-run-actor'] ?? null;
+      const requestedRun = url.searchParams.get('run');
+      const actorCandidate = requestedRun ?? cookies.openrind_ctf_run ?? req.headers['x-openrind-run-actor'] ?? null;
+      const actor = typeof actorCandidate === 'string' && RUN_ID_PATTERN.test(actorCandidate) ? actorCandidate : null;
       const setCookies = [];
       if (!cookies.openrind_ctf_session) {
         setCookies.push(`openrind_ctf_session=${sessionId}; Path=/site/; HttpOnly; SameSite=Strict`);
       }
       if (url.pathname.startsWith('/site/')) {
-        if (url.searchParams.get('run') && !cookies.openrind_ctf_run) {
-          setCookies.push(`openrind_ctf_run=${url.searchParams.get('run')}; Path=/site/; SameSite=Strict`);
+        if (actor && requestedRun && cookies.openrind_ctf_run !== actor) {
+          setCookies.push(`openrind_ctf_run=${actor}; Path=/site/; SameSite=Strict`);
         }
         const jsonBody = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readJson(req, 64 * 1024) : null;
         const result = await task.route({ method: req.method, path: url.pathname, jsonBody, sessionId });
-        await record({ kind: 'site', at: new Date().toISOString(), actor, method: req.method, path: url.pathname,
+        await recordEvent({ kind: 'site', at: new Date().toISOString(), actor, method: req.method, path: url.pathname,
           status: result.status, durationMs: performance.now() - started });
         write(res, result, setCookies.length > 0 ? { 'set-cookie': setCookies } : {}); return;
       }
@@ -59,9 +89,15 @@ export function createChallengeServer({ task, judgeToken, record = async () => {
         const body = await readJson(req, 4096);
         const submission = typeof body?.flag === 'string' ? body.flag : '';
         const correct = submission.trim() === task.flag;
-        await record({ kind: 'judge', at: new Date().toISOString(), actor: req.headers['x-openrind-run-actor'] ?? null,
+        await recordEvent({ kind: 'judge', at: new Date().toISOString(), actor: req.headers['x-openrind-run-actor'] ?? null,
           submission, correct, durationMs: performance.now() - started });
         writeJson(res, 200, { correct }); return;
+      }
+      if (req.method === 'GET' && url.pathname === '/v1/events') {
+        const runId = url.searchParams.get('run');
+        if (!RUN_ID_PATTERN.test(runId ?? '')) { writeJson(res, 400, { code: 'INVALID_RUN_ID' }); return; }
+        const log = eventLogs.get(runId);
+        writeJson(res, 200, { runId, events: log?.events ?? [], truncated: log?.truncated ?? eventActorCapacityExceeded }); return;
       }
       writeJson(res, 404, { code: 'NOT_FOUND' });
     } catch (error) {

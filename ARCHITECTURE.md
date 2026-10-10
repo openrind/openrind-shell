@@ -224,16 +224,22 @@ cleanup for Desktop-owned resources.
 
 ## OTLP Capture Foundation
 
-`openrind-desktop/packages/capture` is a standalone JavaScript producer library.
-It uses standard OTel SDK records and upstream OTLP protobuf transport. Existing
-Desktop Haloop routes still use their current capture path; this library is not
-automatically attached to agents, browser relays, FUSE, or judges.
+`openrind-desktop/packages/capture` uses standard OTel SDK records and upstream
+OTLP protobuf transport. A managed Desktop client can export content-free
+agent lifecycle spans and sampled FUSE health. The supplied Haloop release has
+no matching route or receiver. Existing inference and private trace capture
+are unchanged. Full content capture is not implemented.
 
 ```mermaid
 flowchart LR
   application["Instrumented application"] --> sdk["OTel SDK<br/>spans, byte logs, health metrics"]
+  route["Existing private Haloop control path"] -.-> config["Managed OTLP origin<br/>scoped credential"]
+  config -.-> sdk
+  lifecycle["Desktop agent session exit"] --> sdk
+  callbacks["FUSE callback counters<br/>no paths or file contents"] --> health["Same-UID management health"]
+  health --> poll["Desktop native exec<br/>one poll per active sandbox"] --> sdk
   sdk --> queue["Bounded memory queues<br/>visible rejection and export errors"]
-  queue --> receiver["Configured OTLP/HTTP receiver"]
+  queue -.-> receiver["Managed OTLP/HTTP receiver<br/>separate Haloop release"]
   receiver -.-> storage["Persistent Haloop ingestion<br/>separate integration work"]
 ```
 
@@ -242,6 +248,28 @@ chunks, and reports partial or uncertain acceptance. Its retry buffer is memory
 only. Successful export never marks persistent acceptance or run completeness.
 The real collector fixture verifies a 17 MiB payload and all three signals.
 It does not exercise OpenShell proxy policy or the private Haloop deployment.
+The route client requests a host-reachable origin. It never derives one from
+the inference URL. There is no new WSL receiver or fixed port requirement.
+Missing receiver support is visible in status. No valid route means no SDK
+load or health polling. Polls run after initialization and every 30 seconds.
+They have a five-second timeout and never overlap per sandbox. The last session
+exit releases its poll.
+At most 32 sandboxes are watched. Shutdown waits at most two seconds for export.
+
+The daemon updates fixed-size atomic counters in its implemented callbacks. No
+export, file-content copy, or extra database access occurs on that path. Counts
+reset per daemon instance. Snapshot fields are approximate under concurrency;
+they are not a complete syscall or commit journal. Same-UID health samples are
+diagnostic reports, not independently verified evidence. Receiver failure never
+changes FUSE durability or agent launch decisions.
+
+Desktop exports from its host process, not from the sandbox. Each sandbox has
+its own diagnostic producer and expiring credential. A header callback renews
+that credential through the private control path. No OpenShell policy or
+supervisor patch was added. The build bundles SDK dependencies into an asset
+that the controller loads lazily. Session adoption releases the unused watch.
+Windows Desktop with a live mounted filesystem has not yet been validated with
+this exporter. The Collector test uses synthetic health and lifecycle records.
 See [BUILD.md](./BUILD.md#otlp-capture-library-tests) for the tests and
 [package status](./openrind-desktop/packages/capture/README.md) for remaining work.
 

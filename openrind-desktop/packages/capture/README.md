@@ -6,9 +6,13 @@ It does not install global providers or change an application's inference route.
 
 ## Status
 
-This is a standalone capture foundation, not activation of the full
-[capture specification](../../../w8-haloop-openshell-fuse-integration-plan.md).
-It is not connected to Desktop launches, browser relays, FUSE, or a judge.
+This is a capture foundation with a managed diagnostic client, not activation
+of the full [capture specification](../../../w8-haloop-openshell-fuse-integration-plan.md).
+Desktop uses the diagnostic adapter for agent exit intervals and sampled FUSE
+health. The supplied Haloop release has no managed OTLP route or receiver, so
+normal customer launches report diagnostics as unavailable when the route
+returns 404 or 501. The code is not
+connected to browser payloads, file contents, or a judge.
 It does not implement an autonomous agent or a training-data pipeline.
 
 Implemented:
@@ -28,6 +32,111 @@ process exits. `flush()` and `shutdown()` always report
 `persistentAcceptance: "unverified"`. Neither method can certify a run complete.
 
 ## API
+
+### Runtime Diagnostic Adapter
+
+`@openrind/capture/diagnostics` exports `createRuntimeDiagnostics({ configuration })`.
+Managed configuration supplies `{ endpoint, project, sandboxName, headers, revoke }`.
+`headers` is an async host-only credential callback. `revoke` invalidates the
+current token through the private route on producer shutdown. A producer accepts only its
+configured project and sandbox. The adapter records only scalar lifecycle
+fields and a whitelist of FUSE-health fields.
+It never sends arbitrary input/output or raw health error strings. The general
+payload API below still preserves caller-supplied bytes.
+
+For standalone developer tests, `createRuntimeDiagnostics({ env })` accepts
+`OPENRIND_DIAGNOSTICS_OTLP_ENDPOINT` and optional
+`OPENRIND_DIAGNOSTICS_OTLP_AUTHORIZATION`. Managed configuration ignores these
+values. Desktop does not use this environment-configured path.
+
+Desktop discovers a route on managed agent launch. It loads the SDK bundle and
+starts health polling only after valid configuration. Concurrent
+sessions share one poll per sandbox. Polls run every 30 seconds through native
+exec, not through a watcher or a second database connection. The last session
+exit stops polling. An adopted PTY releases its extra watch. Failed discovery
+is retried on a later launch, not in a background retry loop.
+`runtimeDiagnostics` in Haloop status reports export and
+polling health separately from the existing private capture path.
+
+These are best-effort diagnostics, not a capture profile. FUSE counters reset
+per daemon and are approximate. Older daemons have no counters. The Collector
+test uses synthetic diagnostic input; live Windows Desktop/FUSE export remains
+unverified. See [operator setup](../../../BUILD.md#runtime-diagnostic-setup).
+
+### Managed Route Contract
+
+This is the implemented **client contract for the Haloop team**. It is not a
+claim that the current Haloop image supports it. No gateway source is changed
+here. The host sends this request through the existing private control path:
+
+```http
+POST /diagnostics/route
+Content-Type: application/json
+
+{"contract":"openrind-runtime-diagnostics/v1","sandboxName":"example-owner"}
+```
+
+The proposed response is HTTP 200 with this shape:
+
+```json
+{
+  "contract": "openrind-runtime-diagnostics/v1",
+  "protocol": "http/protobuf",
+  "endpoint": "https://host-reachable-otlp.example",
+  "project": "example-owner",
+  "sandboxName": "example-owner",
+  "signals": ["traces", "logs", "metrics"],
+  "authorization": "Bearer example-token",
+  "expiresAtMs": 1790000000000
+}
+```
+
+The timestamp above is illustrative only. A real response must use the current
+time and set expiry no more than five minutes later.
+
+The endpoint is an origin, not a signal path. URL credentials, query parameters,
+and fragments are rejected. Both scope fields must match the requested sandbox.
+The token must be unexpired. The server must restrict it to diagnostic ingestion
+for that scope and validate payload scope; a client-side field check is not
+server authorization. The client rejects tokens with a lifetime over five
+minutes and refreshes within 30 seconds of expiry.
+
+On producer shutdown, the host sends this private request:
+
+```http
+POST /diagnostics/revoke
+Content-Type: application/json
+
+{"contract":"openrind-runtime-diagnostics/v1","sandboxName":"example-owner","project":"example-owner","authorization":"Bearer example-token"}
+```
+
+HTTP 200 or 204 confirms revocation. HTTP 404 or 501 means revocation is not
+available. Other failures remain visible as `credentialRevocation` status.
+Tokens must still expire within five minutes because shutdown has a two-second
+drain limit and cannot guarantee server revocation during a gateway outage.
+
+HTTP 404 or 501 means `receiver_unsupported`. HTTP 401 or 403 means
+`route_unauthorized`. Malformed responses mean `route_invalid`. Other errors
+mean `route_unavailable`. Discovery has a three-second request deadline and a
+five-second initialization deadline. It never blocks the agent launch.
+
+The credential callback renews within 30 seconds of expiry through the same
+request. Concurrent renewals share one request. Renewal cannot change the
+origin or project, and a failed renewal never uses an expired token. Export
+has a five-second bound to allow renewal. Final drain has a two-second bound.
+Secrets are absent from renderer status and diagnostic records.
+
+`runtimeDiagnostics.routes` reports current producers. `recent` holds at most
+32 closed-route status snapshots. `phase: "ready"` means initialized, not
+delivered. Sampling failures, export failures, and durable acceptance remain
+separate. A validated descriptor is not proof of persistence.
+
+The Desktop build bundles the exporter. The controller imports that asset only
+after route validation. The package supports Node 22.16, as embedded in Electron
+35. The ASAR test checks dependency isolation and missing-bundle behavior. A
+full packaged Windows launch and real FUSE-to-Haloop export still need testing.
+
+### General Producer API
 
 ```js
 import { createCapture } from "@openrind/capture";

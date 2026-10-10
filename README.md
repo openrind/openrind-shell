@@ -10,6 +10,12 @@ configured Hyperbrowser SDK, including the supplied Argide browser module.
 These are API-compatible adapters, not connections to those vendors' clouds.
 There is no browser in the agent sandbox and no browser sidebar.
 
+A capture library sends application telemetry through OpenTelemetry Protocol
+(OTLP). Desktop has a managed client for agent-lifecycle and FUSE-health
+diagnostics. The supplied Haloop source has no matching route or receiver.
+Full content capture and durable Haloop ingestion are not implemented. Desktop's
+required Haloop inference route is unchanged.
+
 ## Start Here
 
 Choose one path. They have different prerequisites and test coverage.
@@ -18,7 +24,8 @@ Choose one path. They have different prerequisites and test coverage.
 |---|---|---|
 | Use Claude with persistent project files | [Start Claude In Desktop](#start-claude-in-desktop) | The managed OpenShell installer targets Windows 11 and WSL2 |
 | Try real browser automation without keys | [Try The Browser Runtime](#try-the-browser-runtime) | Linux x64 test; no Desktop, model, database, or vendor account needed |
-| Develop or evaluate browser CTF tasks | [Run Browser CTF Tasks](#run-browser-ctf-tasks) | Linux x64 and local Docker; a model run also needs an OpenRouter key |
+| Test telemetry or managed runtime diagnostics | [Capture And Haloop](#capture-and-haloop) | Local Collector test; Haloop receiver dependency remains |
+| Develop or evaluate browser CTF tasks | [Run Browser CTF Tasks](#run-browser-ctf-tasks) | Linux x64 and local Docker; a model run needs an OpenRouter key; FUSE mode also needs `/dev/fuse` and local TLS PostgreSQL |
 | Run the supplied Argide application test | [Run Argide](#run-argide) | Needs the private kit; the widget/model test also needs a funded Gemini key |
 | Run a web task in an owner that an operator already enabled | [Use An Enabled Owner](#use-an-enabled-owner) | Browser activation is separate from ordinary Desktop setup |
 | Build Desktop, images, or the gateway | [BUILD.md](./BUILD.md) | Source builds need build tools and matched runtime assets |
@@ -50,29 +57,90 @@ is a separate OpenShell sandbox running Chromium. It does not require Kubernetes
 The **broker** is our host service that creates pods and controls their lifetime.
 The **helper** is the owner's local connection to that broker.
 
+### Which Components Do You Need?
+
+These are separate paths. You do not need to install every component to try one.
+
+| Path | Components you run | Success means |
+|---|---|---|
+| Primary Desktop | Desktop, matched OpenShell assets, FUSE, PostgreSQL, and Haloop | Signed Claude launch and a verified project-file flush |
+| Browser fixture | Local gateway, broker, helper, owner, and Chromium pod | Real browser actions and cleanup pass the fixture |
+| Browser CTF | CTF agent, browser pod, two challenge pods, and an OpenRouter key | Both judges accept; FUSE mode also verifies files after owner recreation |
+| Capture fixture | Node.js library and a temporary OpenTelemetry Collector | Standard telemetry arrives intact; no Haloop storage claim |
+
+The capture library is not a new daemon or a replacement for Haloop. Desktop
+requests a managed route for content-free diagnostics, but the supplied Haloop
+source has no route or OTLP receiver. The browser fixture does not install the
+customer Desktop runtime. Keep those test results separate.
+
 ## Run Browser CTF Tasks
 
 The experimental CTF runtime has two self-contained challenge services. They
 run in separate OpenShell challenge sandboxes. A custom Openrind agent uses the
 unchanged `agent-browser` Kernel provider to drive Chromium in a browser pod.
 It records model requests, model actions, tool observations, and a separate flag
-judge result. It does not run Cyber-Zero, EnIGMA, Docker-in-Docker, or a simulated
-terminal.
+judge result. These are complete, runnable task fixtures in this repository.
+They are independent implementations based on the named challenge families;
+they are not copies of the full upstream benchmark repositories. The runtime
+does not run Cyber-Zero, EnIGMA, Docker-in-Docker, or a simulated terminal.
 
 | Task ID | Challenge basis | Required browser work |
 |---|---|---|
 | `flag-command` | Cybench HTB `Flag Command` | Read same-origin page code and call its hidden command API. |
-| `glacier-exchange` | Cybench GLA `GlacierExchange` | Read supplied wallet code and exploit its signed numeric transfer. |
+| `glacier-exchange` | Cybench GLA `GlacierExchange` | Read supplied wallet code and use the guided floating-point precision exploit. |
 
 The task implementations, agent, image recipe, unit tests, and live runner are
 in this checkout. A developer does not need a Cyber-Zero checkout, an EnIGMA
 image, Compose, or a benchmark archive.
 
+### CTF Runtime Architecture
+
+```mermaid
+flowchart LR
+  subgraph owner["Owner sandbox: custom CTF agent"]
+    agent["Agent + agent-browser"]
+    helper["Kernel-compatible helper<br/>127.0.0.1:19300"]
+    files["/sandbox/work/ctf<br/>FUSE only in --ctf-fuse"]
+    agent --> helper
+    agent --> files
+  end
+  subgraph host["Local OpenShell gateway host"]
+    broker["Browser broker + SQLite<br/>provider sessions and cleanup"]
+  end
+  subgraph pods["Separate OpenShell pods"]
+    browser["Browser pod<br/>headless Chromium"]
+    challenge["Challenge pod<br/>site + judge + run events"]
+    browser -->|"/site/** only"| challenge
+  end
+  model["OpenRouter model API"]
+  pg[("Local TLS PostgreSQL<br/>--ctf-fuse only")]
+  helper --> broker --> browser
+  agent -->|"model request"| model
+  agent -->|"/v1/submit and run-scoped event export"| challenge
+  files -->|"FUSE write and flush"| pg
+```
+
+The owner, browser, and challenge are separate OpenShell sandboxes. The browser
+pod can reach the public challenge site at `/site/**`; it cannot reach the judge
+or event-export routes. The owner can submit a flag and export only the events
+for its run. The judge decides whether the flag is correct. Model requests go
+directly to OpenRouter, not through Haloop.
+
+The agent writes a trajectory, agent events, and a run-scoped challenge-event
+export under `/sandbox/work/ctf`. In regular `--ctf` mode, that path is an
+ordinary container directory. The runner downloads the files before teardown.
+In `--ctf-fuse` mode, `/sandbox/work` is the primary PostgreSQL-backed FUSE
+filesystem. The runner calls `flush-all`, deletes the temporary owner, recreates
+it with the same workspace ID, and compares all six file hashes. This is a
+developer persistence test. It is not Desktop activation, customer workspace
+validation, Haloop capture, or a general CTF benchmark score.
+
 Start with the package unit test. It verifies both browser sites, the exploit
 path, and the independent judges without a model key. Then use the live runner
-only on Linux x64 with local Docker and `OPENROUTER_API_KEY`. It creates a
-temporary gateway, browser owner, browser pods, and challenge pods. It does not
-use Desktop, PostgreSQL, or an existing customer sandbox.
+on Linux x64 with local Docker and `OPENROUTER_API_KEY`. The regular mode uses a
+temporary non-FUSE owner. The `--ctf-fuse` mode uses a disposable primary FUSE
+owner and a local PostgreSQL fixture to test persistence across owner
+delete/recreate. Neither mode uses Desktop or a customer sandbox.
 
 Follow [Openrind CTF Runtime](./openrind-desktop/packages/ctf-runtime/README.md)
 for exact commands. Use the `openrind-ctf` skill when Codex runs this path.
@@ -80,7 +148,15 @@ for exact commands. Use the `openrind-ctf` skill when Codex runs this path.
 A model run is successful only when its trajectory and the separate challenge
 judge both show an accepted flag. The fixture never inserts a known flag or
 claims a model action that the browser tool did not run. Model quality can cause
-a valid runtime test to end with an unaccepted flag.
+a valid runtime test to end with an unaccepted flag. FUSE mode also requires the
+local TLS PostgreSQL fixture and `/dev/fuse`. The CTF agent still calls OpenRouter
+directly. It has no working Haloop mode or CTF OTLP producer. See the package
+guide and `openrind-ctf` skill for setup and evidence limits.
+
+The FUSE-backed fixture passed on Linux x64: both judges accepted, and the
+trajectory, agent-event, and per-run challenge-event files for both tasks had
+matching hashes after owner recreation. This proves the tested local path only.
+It does not prove Desktop integration or Haloop capture.
 
 ## Start Claude In Desktop
 
@@ -202,6 +278,128 @@ cache and can be lost before a durability barrier. A daemon exit or lease loss
 can restart the container and end Claude. Do not delete or reset a live workspace
 as a troubleshooting step. [ARCHITECTURE.md](./ARCHITECTURE.md) describes the
 failure and durability contracts.
+
+## Capture And Haloop
+
+There are two distinct telemetry paths in this checkout:
+
+- **Existing Desktop path:** Haloop routes model requests and captures traces.
+  Launch requires a ready inference route. Capture after launch is best-effort.
+- **Managed runtime diagnostics client:** Desktop requests a diagnostic route
+  from Haloop at agent launch. It can export agent exit intervals and sampled
+  FUSE health through OTLP/HTTP protobuf. The supplied Haloop release has no
+  matching receiver. Normal launches report diagnostics as unavailable until
+  that separate component ships. Inference still works.
+
+OpenTelemetry defines telemetry records and their transport. A **span** records
+an operation and its timing. A **log record** carries an observation or payload.
+A **metric** measures health or activity. These are separate from the model's
+inference API. Neither `/v1/messages` nor `/v1/chat/completions` is an OTLP endpoint.
+
+```mermaid
+flowchart TB
+  subgraph current["Existing Desktop inference path"]
+    agent["Signed agent launch"] --> proxy["OpenShell provider injection"]
+    proxy --> edge["Host-managed Haloop edge"]
+    edge --> model["Model API"]
+    edge --> traces["Existing private trace capture<br/>best-effort after launch"]
+  end
+  subgraph fixture["Standalone capture path: implemented and tested"]
+    app["Explicit library calls<br/>no automatic instrumentation"] --> capture["@openrind/capture<br/>spans, byte logs, health metrics"]
+    capture --> queue["Bounded in-memory queues<br/>chunk hashes and failure status"]
+    queue -->|"OTLP/HTTP protobuf"| collector["Temporary local Collector<br/>decodes and checks payloads"]
+  end
+  subgraph diagnostics["Managed Desktop diagnostics client: implemented"]
+    lifecycle["Agent session exit"] --> capture
+    fused["FUSE callback counters<br/>same-UID management socket"] --> poll["Host samples health through native exec<br/>no file reads or second database path"]
+    poll --> capture
+    route["Private managed-route request<br/>unsupported by supplied Haloop release"] -.-> config["Host-reachable origin<br/>project-scoped credential"]
+    config -.-> capture
+  end
+  subgraph future["Separate integration work: not implemented"]
+    wiring["Full execution, browser, and file-content evidence"]
+    store["Haloop OTLP receiver<br/>persistent storage and completeness checks"]
+    wiring -.-> capture
+    queue -.-> store
+  end
+```
+
+Solid arrows show implemented paths. Dotted arrows show planned integration.
+The Collector test uses synthetic health samples. Windows Desktop and a real
+PostgreSQL-backed mount have not yet been tested together with this exporter.
+The target gives Haloop ownership of model-call records. Application producers
+will report execution evidence. That split must not create a second copy of each
+model call. Haloop will own retention, data selection, and export formats.
+
+### Try Capture Without Keys
+
+Use [BUILD.md: OTLP Capture Library Tests](./BUILD.md#otlp-capture-library-tests)
+on the host. It lists the exact versions, dependency setup, commands, and expected
+output. You need Node.js 22.19 or later and pnpm 10.27.0. The real-collector test
+also needs a local Linux host or WSL shell and a local Linux Docker daemon.
+No model key, PostgreSQL, browser, private Haloop source, or OpenShell build is needed.
+
+The test starts a digest-pinned Collector, sends all three signals, and rebuilds
+a 17 MiB payload from its decoded log records. It checks hashes and trace context.
+It removes its own container and temporary files. Success requires exit code 0
+and the printed `result: "passed"`; this does not start a persistent service.
+
+### Managed Runtime Diagnostics
+
+Desktop discovers the route through its existing private Haloop control path.
+The route must supply an OTLP/HTTP origin reachable from the Desktop host and a
+separate project-scoped credential. This needs no new WSL service, public port,
+or custom TLS terminator. It does need a matching Haloop receiver release.
+See the [managed route contract](./openrind-desktop/packages/capture/README.md#managed-route-contract).
+
+The supplied Haloop source has no matching route. When the endpoint returns
+HTTP 404 or 501, Desktop reports `receiver_unsupported`. A control-path failure
+reports `route_unavailable`. Do not point Desktop at an inference URL or add an
+environment variable to hide these states. The standalone library still accepts
+developer endpoint settings; Desktop does not use them.
+Discovery and export failures do not stop Claude or change FUSE writes.
+
+With a valid route, Desktop loads its bundled exporter and starts one health
+poll per sandbox. Concurrent sessions share that poll. It runs immediately and
+every 30 seconds. The last session exit stops it. Re-attaching to a session
+releases the extra watch. Agent completion, crash, or cancellation emits a
+lifecycle span. With no valid route, the SDK stays unloaded and no polls run.
+
+The rebuilt FUSE daemon exposes callback counts, error counts, and total callback
+time in `openrind-shell-fused health`. Counts reset when the daemon restarts.
+They include only implemented FUSE callbacks, not every syscall or committed
+file version. Older images still report health but have no counters. Do not
+replace a live sandbox just to install diagnostics.
+
+Diagnostic spans contain no file paths, contents, commands, model messages, or
+database URLs. Health comes from a same-UID socket and is not trusted execution
+evidence. The existing Haloop runtime status response includes a separate
+`runtimeDiagnostics` result; it does not replace existing trace-capture status.
+Its `ready` phase means the producer initialized. It does not prove delivery.
+Full Windows app startup and live FUSE-to-Haloop delivery remain release gates.
+
+### Read Capture Results Correctly
+
+| Result | What it proves |
+|---|---|
+| `accepted: true` from a record call | The library admitted that record into its local queue |
+| OTLP receiver acceptance | The receiver accepted an export batch, not necessarily durable storage |
+| `localStatus: "pending"` | No known local evidence loss; not capture completion |
+| `localStatus: "degraded"` | Evidence was rejected or an evidence export failed; inspect the status counters |
+| `persistentAcceptance: "unverified"` | Expected today, including after a successful `flush()` or `shutdown()` |
+
+Queues exist only in process memory. Failed exports remain visible in status,
+but this library cannot recover them after exit. Metrics have separate failure
+counters. FUSE `flush-all` commits project files; it does not flush telemetry.
+Likewise, a telemetry flush does not commit project files.
+
+Full browser/FUSE evidence, producer credentials for that evidence, durable
+ingestion, and capture completeness are still missing. Diagnostic activation
+does not enable those features. Do not point the library at Haloop's existing private JSON ingestion
+endpoint and assume it accepts OTLP. See the
+[package API and limits](./openrind-desktop/packages/capture/README.md) for working
+interfaces, and the [capture specification](./w8-haloop-openshell-fuse-integration-plan.md)
+for the target contract. The specification is not a list of shipped features.
 
 ## Browser Support
 
@@ -413,6 +611,7 @@ Do not overwrite an existing local skill directory to repair discovery.
 |---|---|
 | `openrind-shell` | Desktop setup, signed Claude launches, and FUSE diagnostics |
 | `openrind-dev` | Source builds, host browser setup, Linux browser tests, and the private Argide fixture |
+| `openrind-capture` | OTLP tests, host runtime diagnostics, and telemetry failure diagnosis |
 | `openrind-ctf` | Self-contained browser CTF service tests and model-agent evaluation |
 | `openrind-browser` | Browser commands inside an already enabled owner sandbox |
 | `openrind-navigate` | Filesystem boundaries, SQL queries, and persistence checks |
@@ -435,9 +634,30 @@ For the actual Argide model test, give Codex this task and the private archive p
 > and cleanup. Stop the temporary backend afterward. Do not replace the actual
 > Argide code with an SDK mock or claim Desktop/FUSE support from this test.
 
+For the FUSE-backed CTF persistence test, give Codex this task:
+
+> Read AGENTS.md, README.md's Run Browser CTF Tasks section, the openrind-ctf
+> skill, and BUILD.md's FUSE-Backed Browser CTF Test. Check Linux x64, Docker
+> context and server, the matched OpenShell binaries, `/dev/fuse`, local TLS
+> PostgreSQL setup, images, required ports, and `OPENROUTER_API_KEY` before
+> setup. Run the service tests first. Then run `--ctf-fuse` only in its
+> disposable fixture. Do not use or replace a customer sandbox. Do not print or
+> copy credentials, and do not load an unrelated repository `.env` file. Report
+> both judge results, all live checks, the six before/after hashes, evidence
+> path, cleanup status, and every blocked step. Do not call this Haloop capture
+> or a Desktop test.
+
 For a Desktop launch, use `openrind-shell` instead. Ask the tool to report missing
 Windows runtime assets or credentials before it tries a different launch path.
 Do not let it infer that a repository `.env` file has populated Desktop settings.
+
+For the capture library, give Codex this task:
+
+> Read AGENTS.md, README.md's Capture And Haloop section, the openrind-capture
+> skill, and BUILD.md's OTLP Capture Library Tests. Check Node, pnpm, local Docker,
+> and socket access. Run the unit tests and the real Collector test without loading
+> keys or changing my sandboxes. Report test counts, the Collector receipt, cleanup,
+> and blocked steps. Do not claim Haloop persistence or complete capture from this test.
 
 ## Troubleshooting
 
@@ -458,6 +678,10 @@ Do not let it infer that a repository `.env` file has populated Desktop settings
 | Argide archive is missing or its hash changed | Ask for the matching kit or review the new version. Do not silently substitute the SDK fixture |
 | Argide backend is ready but no model result arrives | Confirm a funded Gemini key and the public product seed. Read private backend errors; readiness does not test model access |
 | Argide widget cannot reach its API | Use the fixture's initial website policy and relay. Do not hot-update a live pod or open all host ports |
+| Capture status stays `pending` after export | Expected; the library has no durable-completion protocol |
+| Capture status is `degraded` | Check rejected, partial, and failed evidence counters; a later successful batch does not erase loss |
+| Collector test passes but Desktop has no new telemetry | Configure the host diagnostic endpoint and start a new agent session; full content capture is not implemented |
+| Capture endpoint validation fails | Supply the receiver's HTTP(S) origin, not an inference URL or a `/v1/traces` path |
 
 Delete Desktop-owned sandboxes through Desktop so it can close agents and revoke
 scoped credentials. A WSL reset also deletes device-local home volumes and traces;
@@ -482,7 +706,7 @@ schema remain for compatibility. Do not rename stored tables to match branding.
 
 - [BUILD.md](./BUILD.md): source setup, image builds, test commands, and host provisioning.
 - [ARCHITECTURE.md](./ARCHITECTURE.md): implemented lifecycle, security, and durability.
-- [Capture library status](./openrind-desktop/packages/capture/README.md): standalone OTLP telemetry and its limits; not active in customer sessions.
+- [Capture library status](./openrind-desktop/packages/capture/README.md): OTLP APIs, managed route contract, and remaining capture limits.
 - [Browser package status](./openrind-desktop/packages/browser-pods/README.md): test evidence and remaining release requirements.
 - [BROWSER-PODS.md](./BROWSER-PODS.md): target design; not a list of shipped capabilities.
 - [Desktop integration](./openrind-desktop/apps/desktop/OPENRIND_SHELL.md): managed gateway, Haloop, and terminal details.

@@ -33,12 +33,18 @@ jobs:
         run: |
           pnpm --filter @openrind/capture test
           pnpm --filter @openrind/capture test:collector
+      - name: Diagnostics suites under Electron's embedded Node
+        working-directory: openrind-desktop/apps/desktop
+        run: pnpm test:diagnostics:electron
       - name: Browser-pod unit and local transport tests
         working-directory: openrind-desktop
         run: |
           pnpm --filter @openrind/browser-pods test
           pnpm --filter @openrind/browser-pods test:transport
           cc -std=c11 -D_POSIX_C_SOURCE=200809L -O2 -Wall -Wextra -Werror -fsyntax-only packages/browser-pods/native/helper.c
+      - name: CTF service and judge tests
+        working-directory: openrind-desktop
+        run: pnpm --filter @openrind/ctf-runtime test
       - name: Electron typecheck
         working-directory: openrind-desktop/apps/desktop
         run: pnpm typecheck:electron

@@ -1,18 +1,29 @@
 # Openrind Shell and Haloop: Unified OTLP Capture
 
-Status: proposed implementation contract. Updated: 2026-10-08.
-Source baseline: Openrind commit `62781c5`; supplied w8-haloop archive dated
-2026-09-29. These pins describe the inspected code, not a release approval.
+Status: proposed implementation contract. Updated: 2026-10-09.
+Source baseline: Openrind commit `15cc71f`, plus the uncommitted diagnostic
+checkpoint reviewed on 2026-10-09; supplied w8-haloop archive dated 2026-09-29.
+These references describe the inspected code, not a release approval.
 
 This document replaces the earlier Haloop integration plan and implementation
 log. Git history retains that log. This is a target specification. It does not
 claim that the current images implement OTLP capture.
 
+The immediate milestone is **managed runtime diagnostics**: agent lifecycle
+and sampled FUSE health sent to Haloop during normal Openrind runs. Customers
+must not need an endpoint environment variable. Section 2.5 defines this smaller
+milestone. The broader capture requirements remain separate target work.
+
+OTLP is platform-neutral. This specification does not require a new WSL service,
+a fixed port `4318`, a custom TLS terminator, or an OpenShell patch. The managed
+deployment must supply a reachable, authenticated OTLP endpoint.
+
 ## 1. Objective and Decisions
 
 Use OpenTelemetry Protocol (OTLP) as the common capture wire for Openrind Shell
-and Desktop. All managed agents and their browser and filesystem runtimes are
-in scope. Haloop's persistent storage is the system of record.
+and Desktop. The broader target covers all managed agents and their browser and
+filesystem runtimes. The immediate diagnostic milestone has the smaller scope
+in Section 2.5. Haloop's persistent storage is the system of record.
 
 The inference API remains the API supported by the client and configured model.
 Choosing OTLP does not require a switch between Anthropic Messages and OpenAI
@@ -33,7 +44,8 @@ evidence.
 | Interactive capture failure | Continue the session and mark its capture degraded |
 | Data selection | Haloop owns retention, redaction, dataset export, and training eligibility |
 | Storage guarantee | Persistent acceptance must be established separately from ordinary OTLP acceptance |
-| Delivery | Release a declared web-capture profile first; retain full-platform capture as the target |
+| Immediate delivery | Managed lifecycle and FUSE-health diagnostics; not complete content capture |
+| Later capture delivery | Release a declared web-capture profile before full-platform capture |
 
 The implementation must use standard SDKs, protobuf definitions, and exporter
 behavior. Openrind-specific work supplies instrumentation, evidence attributes,
@@ -124,9 +136,91 @@ Do not downgrade the profile or remove required sources after a failure.
 Out-of-profile coverage stays visible as not captured; it is not silently
 treated as complete. Dataset eligibility remains a separate server decision.
 
+### 2.5 Immediate Milestone: Managed Runtime Diagnostics
+
+Make the existing content-free diagnostics part of the managed Haloop runtime.
+Normal Desktop launches must not depend on an operator setting
+`OPENRIND_DIAGNOSTICS_OTLP_ENDPOINT`. The runtime provisions the destination,
+credential source, and supported contract before activating the producer.
+
+The milestone contains:
+
+- Managed-agent lifecycle diagnostics, linked to the existing conversation
+  context where it is known.
+- Sampled FUSE state and fixed-size counters, collected through the existing
+  native exec and health socket path.
+- An authenticated OTLP route to Haloop, with receiver availability and export
+  errors shown separately from inference and filesystem health.
+- The session-adoption leak fix, lazy producer loading, deterministic Desktop
+  packaging, and tests under Electron's embedded Node runtime.
+- Real Haloop ingestion tests, a packaged Desktop test, and a live FUSE test.
+
+This milestone adds no browser payload capture, file-version history, model
+payload capture, or execution-completeness authority. It does not satisfy either
+profile in Section 2.4. Do not label diagnostic delivery as a verified trajectory
+or full capture.
+
+The FUSE daemon remains a source of health data, not a network exporter. No new
+in-sandbox producer or `haloop-otlp` provider is needed for this host-only
+milestone. Section 5.2 describes the separate sandbox-export target.
+
+The Openrind team owns producer configuration, session ownership, packaging,
+status, and integration tests. The Haloop team owns the OTLP receiver, scoped
+authentication, storage, and its matched release. This repository must not
+substitute a fake receiver or the private JSON ingestion API for that work.
+
+Diagnostics remain non-blocking. A missing receiver, failed export, or full
+queue must not stop Claude, change model routing, or affect FUSE durability.
+The failure must be visible. Managed activation means automatic configuration;
+it does not mean guaranteed delivery or mandatory capture for every action.
+
 ## 3. Current State and Missing Work
 
-Implementation checkpoint, 2026-10-08: the standalone
+Diagnostic client checkpoint, 2026-10-09: Desktop requests a managed diagnostic
+route on agent launch. Each sandbox gets a separate producer. The SDK loads
+from a built asset only after valid configuration. The Rust daemon exposes
+fixed-size callback counters through its management socket. Export runs on
+the host, outside filesystem requests.
+
+The supplied Haloop release has no matching route or OTLP receiver. Normal
+launches report `receiver_unsupported`, not successful activation. No producer
+loads and no health poll runs in that state. The endpoint environment variable
+is now a standalone developer-library input, not a Desktop activation path.
+The client implementation does not complete either profile in Section 2.4,
+browser payload capture, file-version history, or persistent Haloop ingestion.
+Live Windows Desktop/FUSE export remains unverified.
+
+The existing Haloop stack does have a private collector. Desktop sends its
+application-span JSON through `wsl.exe`, `docker exec`, and an HTTP request
+inside that collector. This is not OTLP ingress. Neither that path nor a healthy
+inference endpoint proves that an external OTLP producer can reach the store.
+
+The client changes address these reviewed defects:
+
+- If `openSession()` adopts an existing PTY after the caller's outer checks,
+  it returns `reused: true` without registering the new lifecycle callback.
+  The new session wrapper releases its extra health watch on that return path.
+  A regression test covers adoption after the outer checks.
+- A lifecycle event uses OTLP when the producer admits it. The old private JSON
+  span path is used only when OTLP does not admit the event. It is not sent by
+  both paths. The PTY watch is released after lifecycle recording completes, so
+  final producer shutdown cannot race ahead of that record.
+- The controller no longer imports the SDK eagerly. The Desktop build creates
+  a self-contained exporter asset, and the archive hook requires it. An
+  isolated ASAR test covers missing and present assets without workspace links.
+- The ASAR test runs in the host-Node OpenShell suite. Electron's Node runner
+  runs only the Node-compatible suites and does not import Electron's built-in
+  module as a test dependency.
+- The package now declares Node `>=22.16.0`. CI runs the capture and diagnostic
+  suites with Electron's own Node runtime.
+
+The ASAR test is not a full packaged GUI launch. Unit and synthetic Collector
+tests do not prove live Windows reachability, a real mounted FUSE sample, or
+persistent Haloop ingestion. These remain release gates. The current restricted
+development environment also blocks Docker, local TCP listeners, and some
+child-process output. Report blocked checks instead of claiming a new live pass.
+
+Earlier foundation checkpoint, 2026-10-08: the standalone
 [`@openrind/capture` package](openrind-desktop/packages/capture/README.md) now
 emits spans, chunked byte logs, and health metrics through official OTel
 components. It has bounded memory queues, explicit export-failure status, and
@@ -134,9 +228,9 @@ local HTTP failure tests. A real Collector 0.145.0 fixture verifies all three
 signals and reassembles a 17 MiB payload with matching hashes and trace context.
 
 This is part of the shared producer foundation, not completion of Stage 0 or
-Stage 1P. It has no application wiring, source seals, persistent retry storage,
-producer registration, or profile-completeness authority. Its collector test
-does not exercise OpenShell or Haloop. Neither capture profile is implemented
+Stage 1P. It has no full content-capture wiring, source seals, persistent retry
+storage, producer registration, or profile-completeness authority. Its collector
+test does not exercise OpenShell or Haloop. Neither capture profile is implemented
 end to end. The existing inference route and runtime behavior remain unchanged.
 
 | Inspected code | Current behavior | Work required |
@@ -157,6 +251,49 @@ the new implementation. A successful model request test does not cover failed
 requests or interrupted streams.
 
 ## 4. Runtime Architecture
+
+### 4.1 Managed Diagnostics
+
+```mermaid
+flowchart LR
+  runtime["Managed Haloop configuration<br/>endpoint, scope, credential source"]
+  lifecycle["Managed agent lifecycle"]
+  fuse["FUSE health socket<br/>same-UID diagnostic data"]
+  poll["Existing native exec poll"]
+  producer["Lazy host diagnostic producer<br/>bounded memory queue"]
+  edge["Authenticated Haloop edge<br/>standard OTLP ingress"]
+  store[("Private Haloop storage")]
+  status["Separate diagnostic status"]
+
+  runtime --> producer
+  lifecycle --> producer
+  fuse --> poll
+  poll --> producer
+  producer -->|"OTLP/HTTP protobuf"| edge
+  edge --> store
+  producer --> status
+  runtime --> status
+```
+
+The runtime supplies a host-reachable OTLP address. Prefer the existing Haloop
+edge once it explicitly supports the required routes and authentication. The
+producer must not guess an address from the inference URL or a container name.
+The private collector remains private.
+
+On Windows, Desktop runs outside the WSL deployment that manages its Linux
+containers. That is a reachability test, not a different telemetry protocol.
+Reuse the approved deployment route. Do not require a new WSL telemetry daemon,
+vsock service, localhost listener, or fixed port merely to implement OTLP.
+Linux deployments use the same producer and receiver contract.
+
+If a deployment cannot supply a reachable route, report diagnostics unavailable.
+Do not silently expose another port, relax network policy, disable TLS checks,
+or convert protobuf into the collector's private application-span JSON.
+
+### 4.2 Broader Capture Target
+
+The following architecture is separate from the managed-diagnostics milestone.
+It does not describe currently connected producers.
 
 ```mermaid
 flowchart LR
@@ -223,7 +360,9 @@ that transport. Generic collectors do not interpret these conventions.
 
 ### 5.2 Provider and Authentication
 
-Add an endpoint-bound `haloop-otlp` provider with this policy profile:
+For later sandbox-originated exports, add an endpoint-bound `haloop-otlp`
+provider with this policy profile. Managed host diagnostics do not use this
+provider and must not inject their credential into an owner.
 
 | Setting | Value |
 |---|---|
@@ -296,6 +435,67 @@ authenticate several independent producers.
 Different credentials inside one agent-controlled process do not make its
 observations independent. Preserve the provenance rules in Section 6. A
 credential update must not silently replace an active owner or relax its policy.
+
+### 5.5 Managed Host Diagnostic Route
+
+The managed Haloop configuration must supply the following producer inputs.
+These are control-plane configuration, not additional OTLP payload fields.
+
+| Input | Requirement |
+|---|---|
+| Endpoint origin | Explicit HTTP(S) origin reachable from the host producer; standard paths from Section 5.1 |
+| Protocol and signals | `http/protobuf`, with declared traces, logs, and metrics support |
+| Contract version | Matched receiver and diagnostic-schema versions; reject unsupported versions |
+| Producer scope | Host-provisioned identity restricted to diagnostics and authorized projects |
+| Credential source | Host-only header callback with renewal and revocation; no secret in renderer status |
+
+The existing Haloop provisioning flow must deliver this route automatically.
+A headless deployment supplies the same inputs through its managed runner.
+No customer endpoint environment variable is required in either case.
+
+The implemented Desktop client uses private `POST /diagnostics/route` with
+`{ contract: "openrind-runtime-diagnostics/v1", sandboxName }`. The response
+contains `contract`, `protocol`, `endpoint`, `project`, `sandboxName`, `signals`,
+`authorization`, and `expiresAtMs`. Both scope fields equal the sandbox name.
+The client requires token lifetime of five minutes or less and refreshes within
+30 seconds of expiry. It calls `POST /diagnostics/revoke` at producer shutdown.
+The current server source has no route for either request. The client reports
+revocation as `unsupported` on 404/501 and as `unavailable` on transport failure.
+The two-second shutdown drain means expiry is still the fallback bound.
+The [package contract](openrind-desktop/packages/capture/README.md#managed-route-contract)
+defines validation, deadlines, and refresh behavior. The Haloop team must adopt
+or jointly revise this contract before release. The supplied source has no
+handler for these requests. The client maps HTTP 404/501 to unsupported. No
+receiver or new WSL service is installed by this change.
+
+Do not copy a sandbox-only address into host configuration. Do not infer a
+receiver from `HALOOP_SANDBOX_ENDPOINT`, `/v1/messages`, `/v1/chat/completions`,
+or `/spans`. A deployment may use the same edge origin for inference and OTLP,
+but it must declare and test both capabilities separately.
+
+The Haloop team must ship authenticated ingestion and storage in a matched
+release. The Openrind runtime checks the declared capability and actual route.
+An installed SDK, image label, or healthy inference request alone is not enough.
+Use shared fixtures to test standard responses, partial rejection, and storage
+readback. Do not treat an empty export probe as proof of persistent storage.
+
+Keep diagnostic credentials separate from inference credentials. Authentication
+must restrict ingestion to the registered producer and authorized projects.
+Use the existing host credential store and approved HTTP headers. Never put
+these credentials in an owner environment, renderer response, span, or log.
+
+The receiver must process protobuf without inference body rewriting. Use
+ordinary OTLP errors and retry behavior. Do not build a custom SSL terminator
+or make a failed refresh select another project's credential.
+
+The environment-configured exporter remains available for explicit developer
+tests. It must not override the managed route in a customer launch. Keep
+development configuration and production activation distinguishable in status.
+
+Missing capability, invalid configuration, failed authentication, and unreachable
+ingress must have distinct status reasons. Preserve working inference while
+diagnostics are unavailable. Do not hide an unavailable receiver by reporting
+diagnostics as disabled by user choice.
 
 ## 6. Record Ownership and Provenance
 
@@ -814,9 +1014,14 @@ The provider file is data configuration, not a new OpenShell protocol feature.
 
 ### 11.3 Staged Delivery
 
-These are workstreams with dependencies, not a requirement to finish every
-platform adapter before the first web run. Start gateway work and the FUSE
-feasibility spike in parallel with the shared producer library.
+Deliver the managed-diagnostics milestone in Section 11.5 first. Its receiver
+work can run in parallel with the Desktop repairs. The larger workstreams below
+remain separate target work. Diagnostic delivery does not satisfy their evidence
+or completeness requirements.
+
+The capture workstreams have their own dependencies. They do not require every
+platform adapter before the first web run. The FUSE feasibility work remains
+outside the diagnostic milestone.
 
 | Stage | Work | Exit evidence |
 |---|---|---|
@@ -906,7 +1111,97 @@ early Stage 0F results. Stage 4 must repeat the measurements against production
 instrumentation. OTLP reuse reduces transport work; it does not remove
 file-history, attribution, and completeness work.
 
+### 11.5 Managed Diagnostics Implementation
+
+#### Session Ownership and Lazy Loading
+
+Keep a lightweight controller in Desktop. It must not import the capture SDK
+at module load. Load the diagnostic producer once after managed configuration
+is available. Catch import and initialization errors and expose a diagnostic
+failure without preventing Desktop or an agent session from starting.
+
+Preserve bounded queues. Calls made before initialization must have an explicit
+admission result. If a lifecycle record cannot be admitted, count the rejection
+and mark diagnostics degraded. Do not buffer without a limit or report missing
+records as delivered.
+
+A released watch must stay released if initialization finishes later. Shutdown
+must prevent new polls and dispose of a late-created producer. Share one load
+operation across concurrent sessions; do not initialize a second SDK for each
+window or re-attach.
+
+When opening a PTY, retain the result of `openSession()`. If `opened.reused` is
+true, release only the watch acquired by that call. Keep the original PTY's
+lifecycle callback and watch. Release on launch failure and on final exit.
+Release functions must remain idempotent.
+
+Use one non-overlapping poll per active sandbox. Keep the current 30-second
+interval, five-second command timeout, and 32-sandbox limit. The last owning
+session stops the poll. Ignore a late health response after release. A command
+with the same shape as an existing launch check still needs live testing under
+these polling limits.
+
+#### Data and Failure Boundaries
+
+Keep lifecycle records associated with their existing conversation context.
+Keep filesystem samples sandbox-scoped. Concurrent sessions must not cause a
+shared mount sample to adopt the most recently launched conversation.
+
+Health output is same-UID writable. Counters are approximate and reset with the
+daemon. Record this provenance; do not promote a sample to trusted execution
+evidence. Keep the diagnostic field allowlist. Do not add file paths, content,
+commands, raw writeback error text, or model payloads.
+
+Keep FUSE persistence unchanged. No watcher, second database connection, direct
+daemon exporter, or committed-version capture belongs to this milestone.
+FUSE `flush-all` does not flush telemetry.
+
+Expose receiver availability, producer initialization, export failures, record
+rejection, and poll failures separately. The existing inference and filesystem
+health states must remain independent. A later successful export must not erase
+an earlier loss. `persistentAcceptance` stays `unverified` without a separate
+storage confirmation contract.
+
+Existing inference capture remains unchanged. Identify diagnostic records as
+diagnostic output, not a replacement for the existing application-span or model
+records. Do not duplicate gateway model capture in the host producer.
+
+#### Packaging and Supported Runtime
+
+Bundle the diagnostic producer and its dependencies into a generated Desktop
+asset. Load that asset dynamically. Installed Desktop must not depend on a
+workspace symlink resolving outside the app. Keep generated assets ignored in
+Git and build them through the normal Desktop packaging path.
+
+Set the capture package's supported Node floor to `22.16.0` and validate it
+under Electron `35.7.5`'s embedded runtime. Run the tests with
+`ELECTRON_RUN_AS_NODE=1`, not only the system `node`. Keep other packages' version
+requirements unchanged unless their own compatibility tests justify a change.
+
+Build and launch the packaged artifact outside the checkout. A source-tree
+import test or typecheck is not a substitute. Test missing or failed diagnostic
+loading without breaking the normal Desktop startup path.
+
+#### Delivery and Documentation
+
+Deliver session and startup repairs first. Coordinate receiver development with
+the Haloop team in parallel. Enable automatic diagnostic export only through a
+matched, tested receiver contract. Until then, report managed diagnostics as
+unavailable; do not claim that this milestone is complete.
+
+Preserve active inference routes and owner containers during rollout. A
+diagnostic upgrade must not force an owner replacement or interrupt an active
+session to change its credentials.
+
+Update README, BUILD, architecture, the capture package contract, and canonical
+skills as behavior ships. Keep README focused on the customer flow and BUILD
+focused on contributor commands. State actual support and remaining test limits.
+Do not document target behavior as an installed feature.
+
 ## 12. Verification and Release Gates
+
+Section 12.5 is the acceptance gate for managed runtime diagnostics. Sections
+12.1-12.4 remain the separate, broader capture gates.
 
 Use controlled application and filesystem fixtures. These tests validate
 capture and transport. They do not require new challenge-solving behavior.
@@ -986,6 +1281,42 @@ to the FUSE spike and full-platform release, not as a prerequisite for the web
 milestone. The full managed-agent and real FUSE matrix remains a full-platform
 release gate.
 
+### 12.5 Managed Diagnostics Acceptance
+
+- Reproduce adoption after the outer PTY checks. Confirm that the new watch is
+  released and the original session's watch and callback remain active. Also
+  test ordinary re-attach, concurrent sessions, launch failure, and final exit.
+- Test disabled startup, missing bundles, failed imports, concurrent loading,
+  release-before-load, and shutdown-before-load. No absent configuration may
+  trigger SDK loading or health polling.
+- Verify bounded record admission and queue limits during initialization and
+  receiver outages. Surface every rejected lifecycle record without stopping
+  the agent. Do not let retries block the FUSE health command or main UI.
+- Run capture and Desktop diagnostic tests under the supported host Node and
+  Electron's embedded Node. Report their versions separately.
+- Build and launch the packaged app outside the source checkout. Test startup
+  without receiver access and successful export through a managed route. Verify
+  that packaged code does not resolve workspace dependencies from the checkout.
+- Run a normal managed session without diagnostic endpoint environment
+  variables. Confirm that lifecycle and real PostgreSQL-backed FUSE-health
+  records reach the intended Haloop project. Synthetic health data does not
+  satisfy this test.
+- Verify a concurrent-session sample stays sandbox-scoped. Confirm that a
+  lifecycle record retains its own conversation context.
+- Test invalid contracts, authentication failure, credential expiry and renewal,
+  unreachable routes, partial rejection, receiver restart, and bounded shutdown.
+  Diagnostic failure must not break existing inference or filesystem operations.
+- Read diagnostic records from Haloop storage after receiver restart. Keep this
+  result separate from transport acceptance and capture-profile completeness.
+- Run packaged Windows/WSL reachability and Linux transport tests. Use the
+  deployment-supplied endpoint in both. No new WSL protocol or fixed port is
+  part of the acceptance contract.
+
+The existing standard Collector fixture remains a protocol test. It does not
+replace the matched Haloop, packaged Desktop, and live FUSE gates. Record blocked
+tests explicitly. Do not change runtime isolation or network policy to turn a
+blocked test into a passing claim.
+
 ## 13. Evidence and Source References
 
 These are the inspected implementation boundaries. They are not claims that the
@@ -994,6 +1325,10 @@ proposed capture features already exist.
 | Source | Evidence used |
 |---|---|
 | [Desktop Haloop runtime](openrind-desktop/apps/desktop/electron/openshell/haloop-runtime.mjs) | Existing route and signed-context lifecycle |
+| [Desktop diagnostic controller](openrind-desktop/apps/desktop/electron/openshell/runtime-diagnostics.mjs) | Optional polling and eager package import in the reviewed checkpoint |
+| [PTY lifecycle](openrind-desktop/apps/desktop/electron/openshell/openrind-shell-pty.mjs) | Session adoption retains the original lifecycle callback |
+| [Diagnostic producer](openrind-desktop/packages/capture/src/diagnostics.mjs) | Current environment-only activation and allowed diagnostic fields |
+| [Desktop packaging](openrind-desktop/apps/desktop/electron-builder.yml) | Packaged file selection; installed startup still needs verification |
 | [Inference provider](vendor/openshell/providers/haloop-anthropic.yaml) | Endpoint-bound credentials and executable identity |
 | [Browser binding](openrind-desktop/apps/desktop/electron/openshell/browser-binding.mjs) | REST relay profile and body-rewrite controls |
 | [Browser relay](openrind-desktop/packages/browser-pods/src/transport.mjs) | Complete-message relay boundary |

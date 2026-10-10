@@ -1,6 +1,7 @@
 use crate::cache::{
     CachedLookup, DirtyCache, InodeState, MetadataCache, MAX_DIRTY_GLOBAL, MAX_DIRTY_PER_INODE,
 };
+use crate::diagnostics::Diagnostics;
 use crate::error::{Error, Result};
 use crate::model::{now_ns, ns_to_system_time, Node, NodeKind, BLOCK_SIZE};
 use crate::runtime::RuntimeState;
@@ -50,6 +51,7 @@ pub struct FilesystemCore {
     metadata: MetadataCache,
     handles: DashMap<u64, OpenHandle>,
     next_handle: AtomicU64,
+    diagnostics: Diagnostics,
 }
 
 impl FilesystemCore {
@@ -62,6 +64,7 @@ impl FilesystemCore {
             metadata: MetadataCache::default(),
             handles: DashMap::new(),
             next_handle: AtomicU64::new(1),
+            diagnostics: Diagnostics::default(),
         })
     }
 
@@ -232,8 +235,11 @@ impl FilesystemCore {
 
     pub fn health_json(&self) -> serde_json::Value {
         let error = self.cache.first_error();
-        self.runtime
-            .health_json(self.cache.dirty_bytes(), error.as_deref())
+        let mut health = self
+            .runtime
+            .health_json(self.cache.dirty_bytes(), error.as_deref());
+        health["diagnostics"] = self.diagnostics.snapshot();
+        health
     }
 
     pub fn discard_dirty_for_fence(&self, reason: &str) {
@@ -280,10 +286,11 @@ impl OpeneralFilesystem {
         Self { core }
     }
 
-    fn reply_error<T>(reply: T, error: Error)
+    fn reply_error<T>(&self, reply: T, error: Error)
     where
         T: ErrorReply,
     {
+        self.core.diagnostics.error();
         tracing::debug!(error = %error, "FUSE request failed");
         reply.send_error(error.errno());
     }
@@ -321,6 +328,7 @@ impl Filesystem for OpeneralFilesystem {
     }
 
     fn lookup(&self, _request: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
+        let _timer = self.core.diagnostics.request();
         let result = (|| {
             let store = self.core.store()?;
             let parent_id = store.db_node_id(parent.into())?;
@@ -332,11 +340,12 @@ impl Filesystem for OpeneralFilesystem {
                 let attr = self.core.attr(&store, node.clone());
                 reply.entry(&TTL, &attr, Generation(FUSE_GENERATION));
             }
-            Err(error) => Self::reply_error(reply, error),
+            Err(error) => self.reply_error(reply, error),
         }
     }
 
     fn getattr(&self, _request: &Request, ino: INodeNo, _fh: Option<FileHandle>, reply: ReplyAttr) {
+        let _timer = self.core.diagnostics.request();
         let result = (|| {
             let store = self.core.store()?;
             let node = self.core.node_for_inode(&store, ino)?;
@@ -344,7 +353,7 @@ impl Filesystem for OpeneralFilesystem {
         })();
         match result {
             Ok((store, node)) => reply.attr(&TTL, &self.core.attr(&store, node)),
-            Err(error) => Self::reply_error(reply, error),
+            Err(error) => self.reply_error(reply, error),
         }
     }
 
@@ -366,6 +375,7 @@ impl Filesystem for OpeneralFilesystem {
         _flags: Option<BsdFileFlags>,
         reply: ReplyAttr,
     ) {
+        let _timer = self.core.diagnostics.request();
         let result = (|| {
             let store = self.core.store()?;
             let node_id = store.db_node_id(ino.into())?;
@@ -399,11 +409,12 @@ impl Filesystem for OpeneralFilesystem {
         })();
         match result {
             Ok((store, node)) => reply.attr(&TTL, &self.core.attr(&store, node)),
-            Err(error) => Self::reply_error(reply, error),
+            Err(error) => self.reply_error(reply, error),
         }
     }
 
     fn readlink(&self, _request: &Request, ino: INodeNo, reply: ReplyData) {
+        let _timer = self.core.diagnostics.request();
         let result = (|| {
             let store = self.core.store()?;
             let node = self.core.node_for_inode(&store, ino)?;
@@ -415,7 +426,7 @@ impl Filesystem for OpeneralFilesystem {
         })();
         match result {
             Ok(target) => reply.data(&target),
-            Err(error) => Self::reply_error(reply, error),
+            Err(error) => self.reply_error(reply, error),
         }
     }
 
@@ -428,6 +439,7 @@ impl Filesystem for OpeneralFilesystem {
         umask: u32,
         reply: ReplyEntry,
     ) {
+        let _timer = self.core.diagnostics.request();
         let result = (|| {
             let store = self.core.store()?;
             let parent_id = store.db_node_id(parent.into())?;
@@ -449,11 +461,12 @@ impl Filesystem for OpeneralFilesystem {
                 let attr = self.core.attr(&store, node.clone());
                 reply.entry(&TTL, &attr, Generation(FUSE_GENERATION));
             }
-            Err(error) => Self::reply_error(reply, error),
+            Err(error) => self.reply_error(reply, error),
         }
     }
 
     fn unlink(&self, _request: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEmpty) {
+        let _timer = self.core.diagnostics.request();
         let result = (|| {
             let store = self.core.store()?;
             let parent_id = store.db_node_id(parent.into())?;
@@ -468,11 +481,12 @@ impl Filesystem for OpeneralFilesystem {
         })();
         match result {
             Ok(()) => reply.ok(),
-            Err(error) => Self::reply_error(reply, error),
+            Err(error) => self.reply_error(reply, error),
         }
     }
 
     fn rmdir(&self, _request: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEmpty) {
+        let _timer = self.core.diagnostics.request();
         let result = (|| {
             let store = self.core.store()?;
             let parent_id = store.db_node_id(parent.into())?;
@@ -485,7 +499,7 @@ impl Filesystem for OpeneralFilesystem {
         })();
         match result {
             Ok(()) => reply.ok(),
-            Err(error) => Self::reply_error(reply, error),
+            Err(error) => self.reply_error(reply, error),
         }
     }
 
@@ -497,6 +511,7 @@ impl Filesystem for OpeneralFilesystem {
         target: &Path,
         reply: ReplyEntry,
     ) {
+        let _timer = self.core.diagnostics.request();
         let result = (|| {
             let store = self.core.store()?;
             let parent_id = store.db_node_id(parent.into())?;
@@ -518,7 +533,7 @@ impl Filesystem for OpeneralFilesystem {
                 let attr = self.core.attr(&store, node.clone());
                 reply.entry(&TTL, &attr, Generation(FUSE_GENERATION));
             }
-            Err(error) => Self::reply_error(reply, error),
+            Err(error) => self.reply_error(reply, error),
         }
     }
 
@@ -532,6 +547,7 @@ impl Filesystem for OpeneralFilesystem {
         flags: RenameFlags,
         reply: ReplyEmpty,
     ) {
+        let _timer = self.core.diagnostics.request();
         let result = (|| {
             if flags.bits() & !libc::RENAME_NOREPLACE != 0 {
                 return Err(Error::Unsupported);
@@ -582,11 +598,12 @@ impl Filesystem for OpeneralFilesystem {
         })();
         match result {
             Ok(()) => reply.ok(),
-            Err(error) => Self::reply_error(reply, error),
+            Err(error) => self.reply_error(reply, error),
         }
     }
 
     fn open(&self, _request: &Request, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
+        let _timer = self.core.diagnostics.request();
         let result = (|| {
             let store = self.core.store()?;
             let mut node = self.core.node_for_inode(&store, ino)?;
@@ -612,7 +629,7 @@ impl Filesystem for OpeneralFilesystem {
         })();
         match result {
             Ok(handle) => reply.opened(handle, FopenFlags::empty()),
-            Err(error) => Self::reply_error(reply, error),
+            Err(error) => self.reply_error(reply, error),
         }
     }
 
@@ -627,6 +644,7 @@ impl Filesystem for OpeneralFilesystem {
         _lock_owner: Option<LockOwner>,
         reply: ReplyData,
     ) {
+        let _timer = self.core.diagnostics.request();
         let result = (|| {
             let handle = self.core.handle(fh)?;
             let store = self.core.store()?;
@@ -639,7 +657,7 @@ impl Filesystem for OpeneralFilesystem {
         })();
         match result {
             Ok(data) => reply.data(&data),
-            Err(error) => Self::reply_error(reply, error),
+            Err(error) => self.reply_error(reply, error),
         }
     }
 
@@ -655,6 +673,7 @@ impl Filesystem for OpeneralFilesystem {
         _lock_owner: Option<LockOwner>,
         reply: ReplyWrite,
     ) {
+        let _timer = self.core.diagnostics.request();
         let result = (|| {
             let handle = self.core.handle(fh)?;
             let store = self.core.store()?;
@@ -683,7 +702,7 @@ impl Filesystem for OpeneralFilesystem {
         })();
         match result {
             Ok(count) => reply.written(count),
-            Err(error) => Self::reply_error(reply, error),
+            Err(error) => self.reply_error(reply, error),
         }
     }
 
@@ -695,6 +714,7 @@ impl Filesystem for OpeneralFilesystem {
         _lock_owner: LockOwner,
         reply: ReplyEmpty,
     ) {
+        let _timer = self.core.diagnostics.request();
         let result = (|| {
             let handle = self.core.handle(fh)?;
             let Some(state) = self.core.cache.existing(handle.node_id) else {
@@ -713,7 +733,7 @@ impl Filesystem for OpeneralFilesystem {
         })();
         match result {
             Ok(()) => reply.ok(),
-            Err(error) => Self::reply_error(reply, error),
+            Err(error) => self.reply_error(reply, error),
         }
     }
 
@@ -727,8 +747,10 @@ impl Filesystem for OpeneralFilesystem {
         _flush: bool,
         reply: ReplyEmpty,
     ) {
+        let _timer = self.core.diagnostics.request();
         let handle_id = u64::from(fh);
         let Some((_, handle)) = self.core.handles.remove(&handle_id) else {
+            self.core.diagnostics.error();
             reply.error(Errno::EBADF);
             return;
         };
@@ -753,7 +775,7 @@ impl Filesystem for OpeneralFilesystem {
         })();
         match result {
             Ok(()) => reply.ok(),
-            Err(error) => Self::reply_error(reply, error),
+            Err(error) => self.reply_error(reply, error),
         }
     }
 
@@ -765,6 +787,7 @@ impl Filesystem for OpeneralFilesystem {
         _datasync: bool,
         reply: ReplyEmpty,
     ) {
+        let _timer = self.core.diagnostics.request();
         let result = (|| {
             let handle = self.core.handle(fh)?;
             match self.core.cache.existing(handle.node_id) {
@@ -774,11 +797,12 @@ impl Filesystem for OpeneralFilesystem {
         })();
         match result {
             Ok(()) => reply.ok(),
-            Err(error) => Self::reply_error(reply, error),
+            Err(error) => self.reply_error(reply, error),
         }
     }
 
     fn opendir(&self, _request: &Request, ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
+        let _timer = self.core.diagnostics.request();
         let result = (|| {
             let store = self.core.store()?;
             let node = self.core.node_for_inode(&store, ino)?;
@@ -789,7 +813,7 @@ impl Filesystem for OpeneralFilesystem {
         })();
         match result {
             Ok(handle) => reply.opened(handle, FopenFlags::empty()),
-            Err(error) => Self::reply_error(reply, error),
+            Err(error) => self.reply_error(reply, error),
         }
     }
 
@@ -801,6 +825,7 @@ impl Filesystem for OpeneralFilesystem {
         offset: u64,
         mut reply: ReplyDirectory,
     ) {
+        let _timer = self.core.diagnostics.request();
         let result = (|| {
             let store = self.core.store()?;
             let node_id = store.db_node_id(ino.into())?;
@@ -811,7 +836,7 @@ impl Filesystem for OpeneralFilesystem {
         let (store, parent, entries) = match result {
             Ok(value) => value,
             Err(error) => {
-                Self::reply_error(reply, error);
+                self.reply_error(reply, error);
                 return;
             }
         };
@@ -849,6 +874,7 @@ impl Filesystem for OpeneralFilesystem {
         _flags: OpenFlags,
         reply: ReplyEmpty,
     ) {
+        let _timer = self.core.diagnostics.request();
         self.core.handles.remove(&u64::from(fh));
         reply.ok();
     }
@@ -861,11 +887,13 @@ impl Filesystem for OpeneralFilesystem {
         _datasync: bool,
         reply: ReplyEmpty,
     ) {
+        let _timer = self.core.diagnostics.request();
         // Namespace mutations commit synchronously before their replies.
         reply.ok();
     }
 
     fn statfs(&self, _request: &Request, _ino: INodeNo, reply: ReplyStatfs) {
+        let _timer = self.core.diagnostics.request();
         let result = (|| {
             let store = self.core.store()?;
             self.core.block(store.statfs())
@@ -889,18 +917,19 @@ impl Filesystem for OpeneralFilesystem {
                     BLOCK_SIZE,
                 );
             }
-            Err(error) => Self::reply_error(reply, error),
+            Err(error) => self.reply_error(reply, error),
         }
     }
 
     fn access(&self, _request: &Request, ino: INodeNo, _mask: AccessFlags, reply: ReplyEmpty) {
+        let _timer = self.core.diagnostics.request();
         let result = (|| {
             let store = self.core.store()?;
             self.core.node_for_inode(&store, ino).map(|_| ())
         })();
         match result {
             Ok(()) => reply.ok(),
-            Err(error) => Self::reply_error(reply, error),
+            Err(error) => self.reply_error(reply, error),
         }
     }
 
@@ -914,6 +943,7 @@ impl Filesystem for OpeneralFilesystem {
         _flags: i32,
         reply: ReplyCreate,
     ) {
+        let _timer = self.core.diagnostics.request();
         let result = (|| {
             let store = self.core.store()?;
             let parent_id = store.db_node_id(parent.into())?;
@@ -943,7 +973,7 @@ impl Filesystem for OpeneralFilesystem {
                     FopenFlags::empty(),
                 );
             }
-            Err(error) => Self::reply_error(reply, error),
+            Err(error) => self.reply_error(reply, error),
         }
     }
 }

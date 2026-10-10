@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { createCapture, CAPTURE_LIMITS } from "../../src/index.mjs";
+import { createRuntimeDiagnostics } from "../../src/diagnostics.mjs";
 
 const image = "otel/opentelemetry-collector-contrib:0.145.0@sha256:a7343f01869071ea3f4c5e1e97df1bb1b3c4d5c77247db80e053a80b9df530c4";
 const name = `openrind-capture-test-${randomUUID()}`;
@@ -15,6 +16,7 @@ const docker = (...args) => execFileSync("docker", args, {
 }).trim();
 let created = false;
 let capture;
+let diagnostics;
 
 function attributes(record) {
   return Object.fromEntries((record.attributes ?? []).map(({ key, value }) => [key,
@@ -94,6 +96,19 @@ service:
   assert.equal(state.localStatus, "pending");
   assert.equal(state.persistentAcceptance, "unverified");
   assert.deepEqual(state.accepted, { logs: 6, traces: 1, metrics: 1 });
+  diagnostics = createRuntimeDiagnostics({ env: { OPENRIND_DIAGNOSTICS_OTLP_ENDPOINT: endpoint } });
+  assert.equal(diagnostics.filesystemHealth("collector-fixture", {
+    state: "writable", dirtyBytes: 4096, lastWritebackError: null,
+    diagnostics: { version: 1, instanceId: "12345678-1234-1234-1234-123456789abc",
+      requestsStarted: 3, requestsCompleted: 3, requestErrors: 0, requestDurationMicros: 200 },
+  }), true);
+  assert.equal(diagnostics.agentLifecycle({ traceId, rootSpanId: parentSpanId }, {
+    startMs: Date.now(), endMs: Date.now(), attributes: {
+      "openrind.agent.id": "claude", "openrind.lifecycle": "completed",
+    },
+  }), true);
+  const diagnosticStatus = await diagnostics.shutdown();
+  assert.equal(diagnosticStatus.capture.accepted.traces, 2);
   docker("stop", "--time", "10", name);
 
   const logs = records("logs", "scopeLogs", "logRecords");
@@ -117,21 +132,28 @@ service:
   assert.equal(Number(manifest.bytes), bytes.length);
   assert.equal(Number(manifest.partCount), 5);
   const spans = records("traces", "scopeSpans", "spans");
-  assert.equal(spans.length, 1);
+  assert.equal(spans.length, 3);
   assert.equal(spans[0].traceId, traceId);
   assert.equal(spans[0].parentSpanId, parentSpanId);
   assert.equal(spans[0].spanId, operation.spanId);
+  const filesystem = spans.find(span => span.name === "filesystem.health");
+  assert.equal(Number(attributes(filesystem)["filesystem.requestsCompleted"]), 3);
+  assert.equal(attributes(filesystem)["diagnostic.source"], "same_uid_fuse_health");
+  const lifecycle = spans.find(span => span.name === "agent.session");
+  assert.equal(lifecycle.traceId, traceId);
+  assert.equal(lifecycle.parentSpanId, parentSpanId);
   const metrics = records("metrics", "scopeMetrics", "metrics");
   assert.ok(metrics.some((metric) => metric.name === "openrind.capture.records"));
   console.log(JSON.stringify({ result: "passed", image, logs: logs.length, spans: spans.length,
     payloadBytes: bytes.length, signals: ["logs", "traces", "metrics"],
-    limits: "Collector interoperability only; no OpenShell or Haloop durability claim" }, null, 2));
+    limits: "Collector and diagnostic projection only; synthetic health input, no live mount or Haloop durability claim" }, null, 2));
 } catch (error) {
   if (created) console.error(docker("logs", "--tail", "30", name));
   throw error;
 } finally {
   try {
     if (capture) await capture.shutdown();
+    if (diagnostics) await diagnostics.shutdown();
   } finally {
     if (created) docker("rm", "-f", name);
     rmSync(directory, { recursive: true, force: true });

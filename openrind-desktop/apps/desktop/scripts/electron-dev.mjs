@@ -202,6 +202,7 @@ async function stopAll(exitCode = 0) {
 process.once("SIGINT", () => void stopAll(130));
 process.once("SIGTERM", () => void stopAll(143));
 
+runSync(nodeCmd, [resolve(__dirname, "build-diagnostics.mjs")], { cwd: desktopRoot, shell: false });
 runSync(nodeCmd, [resolve(__dirname, "prepare-sidecar.mjs"), "--force", "--outdir", electronSidecarDir], { cwd: desktopRoot, shell: false });
 
 const initialProbeUrls = [startUrl, ...viteProbeUrls].filter(Boolean);

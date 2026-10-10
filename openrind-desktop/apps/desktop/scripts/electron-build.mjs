@@ -38,6 +38,7 @@ function run(command, args, cwd, env) {
   }
 }
 
+run(nodeCmd, [resolve(__dirname, "build-diagnostics.mjs")], desktopRoot);
 run(nodeCmd, [resolve(__dirname, "prepare-sidecar.mjs"), "--force", "--outdir", electronSidecarDir], desktopRoot);
 // OPENRIND_DESKTOP_ELECTRON_BUILD tells Vite to emit relative asset paths so
 // index.html resolves /assets/* correctly when loaded via file:// from

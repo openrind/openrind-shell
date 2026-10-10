@@ -16,6 +16,8 @@
     "dev:windows:x64": "node ./scripts/dev-windows.mjs x64",
     "build": "node ./scripts/electron-build.mjs",
     "build:electron": "node ./scripts/electron-build.mjs",
+    "build:diagnostics": "node ./scripts/build-diagnostics.mjs",
+    "test:diagnostics:electron": "pnpm run build:diagnostics && node ./scripts/test-diagnostics-electron.mjs",
     "build:openshell-rootfs": "node ./scripts/build-openshell-rootfs.mjs",
     "build:openshell-runtime-images": "node ./scripts/build-openshell-runtime-images.mjs",
     "build:openshell-haloop-images:production": "node ./scripts/build-openshell-runtime-images.mjs --haloop-only --production-haloop",
@@ -29,17 +31,20 @@
     "check:cast-shape": "node ./scripts/verify-cast-shape.mjs",
     "typecheck:electron": "pnpm --dir ../server exec tsc -p ../desktop/tsconfig.electron.json --noEmit",
     "prepare:sidecar": "node ./scripts/prepare-sidecar.mjs",
-    "test:openshell": "node --test __tests__/openshell/*.test.mjs",
+    "test:openshell": "pnpm run build:diagnostics && node --test __tests__/openshell/*.test.mjs",
     "test:openshell:e2e": "node --test __tests__/openshell.spec.mjs"
   },
   "dependencies": {
     "electron-updater": "^6.3.9"
   },
   "devDependencies": {
+    "@electron/asar": "3.4.1",
+    "@openrind/capture": "workspace:*",
     "@tauri-apps/cli": "^2.0.0",
     "electron": "^35.0.0",
     "electron-builder": "^25.1.8",
-    "electron-devtools-installer": "^4.0.0"
+    "electron-devtools-installer": "^4.0.0",
+    "esbuild": "0.27.2"
   },
   "packageManager": "pnpm@10.27.0",
   "opencodeRouterVersion": "0.14.0"

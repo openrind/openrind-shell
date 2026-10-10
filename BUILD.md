@@ -11,6 +11,8 @@ It uses separate owner, challenge, and Chromium pods. It does not need
 PostgreSQL, Haloop, Cyber-Zero, EnIGMA, or Claude. It is not a customer
 FUSE-owner test.
 For the customer Desktop path, use [Windows Desktop Source Setup](#windows-desktop-source-setup).
+For the standalone telemetry library, use [OTLP Capture Library Tests](#otlp-capture-library-tests).
+That path needs none of the OpenShell or FUSE build prerequisites below.
 
 ## Source Layout
 
@@ -69,13 +71,33 @@ rebuild NVIDIA's Community base to work around image resolution.
 
 ## OTLP Capture Library Tests
 
-The standalone `@openrind/capture` package emits application telemetry through
-standard OTLP/HTTP protobuf. It is not enabled in customer Desktop sessions.
-Use Node.js 22.19 or later and the Desktop workspace's pinned pnpm version.
+The `@openrind/capture` package emits application telemetry through standard
+OTLP/HTTP protobuf. Desktop has a managed diagnostic-route client. The supplied
+Haloop release has no matching receiver. Full content capture is not implemented.
+Use Node.js 22.19 or later and pnpm 10.27.0, pinned in
+`openrind-desktop/package.json`. Use a Linux host or WSL shell for the collector
+fixture. It uses the host UID/GID and bind-mounts a host temporary directory.
+A remote Docker daemon or a native Windows Node process is not this test setup.
+
+Run this preflight on the host, not inside a customer sandbox:
+
+```bash
+node --version
+pnpm --version
+docker context show
+docker info --format '{{.OSType}}/{{.Architecture}}'
+```
+
+The Docker server must be local and report `linux`. Both tests need local TCP
+socket access. Unit tests do not need Docker. If Docker access fails, report the
+error and run only the unit tests if their prerequisites pass. Do not substitute
+unit results for the collector test or load repository `.env` files.
+
+From the repository root:
 
 ```bash
 cd openrind-desktop
-pnpm install --frozen-lockfile
+pnpm install --filter @openrind/capture --frozen-lockfile
 pnpm --filter @openrind/capture test
 pnpm --filter @openrind/capture test:collector
 ```
@@ -84,12 +106,102 @@ Unit tests use local HTTP fixtures. The collector test needs a local Linux
 Docker daemon. It starts a digest-pinned OpenTelemetry Collector, verifies all
 three signals, reconstructs a 17 MiB byte payload, and removes its own resources.
 It needs no database, model key, OpenShell gateway, or NVIDIA image build.
+Docker may pull the Collector image on the first run. The receiver binds to a
+temporary host-loopback port. The fixture uses synthetic bytes, not user files.
+
+Require these results:
+
+- Unit tests exit 0. Record the actual test count.
+- The collector test exits 0 and prints `result: "passed"`, `logs: 6`, `spans: 3`,
+  `payloadBytes: 17825792`, and all three signals: logs, traces, and metrics.
+- The script's own container and temporary directory are removed. Unlike the
+  browser fixture, it does not retain an evidence directory. Save its printed
+  receipt if you need a test record.
+
+Two spans test the runtime diagnostic field mapping with synthetic filesystem
+health and lifecycle input. Rust tests exercise the actual management socket.
+Neither fixture proves live FUSE-to-Windows-Desktop export.
+
+Run `docker ps -a --filter name=openrind-capture-test-` to check for leftovers.
+Do not delete matching resources from another run. On a failed run, identify
+the exact resource before cleanup. Report the commit, Node/pnpm versions, Docker
+context, exit codes, receipt, and any missing prerequisites.
 
 A passing collector test proves wire interoperability only. It does not prove
 OpenShell policy routing, Haloop persistence, or completion of a capture profile.
 See the [capture package](./openrind-desktop/packages/capture/README.md) for API
 and failure semantics. Do not point it at the existing private JSON ingestion
 endpoint and assume that endpoint supports OTLP.
+
+### Runtime Diagnostic Setup
+
+This is host telemetry, not a replacement for required Haloop inference.
+Desktop requests `POST /diagnostics/route` through the existing private Haloop
+control path. The client contract is in the
+[capture package README](./openrind-desktop/packages/capture/README.md#managed-route-contract).
+The Haloop team must implement that route and OTLP/HTTP protobuf ingestion at
+`/v1/traces`, `/v1/logs`, and `/v1/metrics`. The supplied Haloop source has no
+matching route. The Desktop client maps HTTP 404 or 501 to
+`receiver_unsupported`. No new receiver, WSL service, or port 4318 is installed here.
+
+The managed response supplies a host-reachable origin, scope, and short-lived
+token. The client checks the contract and renews credentials through the same control
+path. Tokens stay in host memory. They never enter renderer status, owner
+environments, or diagnostic records. The library uses host proxy settings and
+normal TLS validation. An approved HTTPS endpoint is required for remote use.
+
+Desktop does not use `OPENRIND_DIAGNOSTICS_OTLP_ENDPOINT` or
+`OPENRIND_DIAGNOSTICS_OTLP_AUTHORIZATION`. Those remain developer inputs for
+direct `createRuntimeDiagnostics({ env })` library tests only. A valid managed
+route takes priority over all developer settings. An inference URL is not an
+OTLP capability declaration.
+
+After route initialization, the host polls `openrind-shell-fused health` through
+the paired native CLI every 30 seconds while a managed agent session is live.
+Concurrent sessions share one poll per sandbox. Each poll has a five-second timeout; polls
+do not overlap. There are at most 32 watched sandboxes. A session exit releases
+its poll and emits a content-free lifecycle span.
+
+The FUSE daemon adds `diagnostics.version`, `instanceId`, `requestsStarted`,
+`requestsCompleted`, `requestErrors`, and `requestDurationMicros` to health JSON.
+Counters reset with the daemon instance. Snapshot fields are approximate under
+concurrency. Error counts include ordinary errors such as missing files. No path,
+inode content, database credential, or command is exported. Existing older
+images remain usable; `filesystem.counters_available` is false for them.
+
+Check `runtimeDiagnostics` in the existing Haloop runtime status response and
+the receiver's decoded `filesystem.health` and `agent.session` spans. A configured
+route alone is not evidence of delivery. `phase: "ready"` means initialized,
+not connected or stored. `receiver_unsupported`, `route_invalid`,
+`route_unauthorized`, and `route_unavailable` identify discovery failures.
+A later launch retries failed discovery. Sampling errors and exporter errors
+are separate. Export is bounded and fail-open; shutdown waits at most two seconds
+and reports `drainTimedOut` if it cannot finish. In-process buffers are not durable.
+No diagnostic failure changes the filesystem's persistence contract.
+
+From the repository root, verify both producer and Desktop integration:
+
+```bash
+cargo test -p openeral-fused
+cargo clippy -p openeral-fused --all-targets -- -D warnings
+pnpm --dir openrind-desktop/apps/desktop test:openshell
+pnpm --dir openrind-desktop/apps/desktop test:diagnostics:electron
+pnpm --dir openrind-desktop/apps/desktop typecheck:electron
+```
+
+`test:openshell`, development startup, and the Desktop build first bundle the
+exporter into `electron/generated/runtime-diagnostics.cjs`. The archive hook
+requires this asset. The SDK loads only after valid managed configuration.
+`test:diagnostics:electron` runs the Node-compatible suites under Electron 35's
+Node 22.16 runtime. The ASAR smoke test stays in `test:openshell` under host
+Node because it imports Electron and starts Electron itself. The capture package
+supports Node 22.16; contributor setup still uses Node 22.19 or newer. The ASAR
+test checks loading with and without the bundle, away from workspace
+dependencies. It is not a full packaged GUI startup test.
+
+Windows Desktop with a live PostgreSQL-backed mount remains a separate test.
+Do not claim it passed from the unit or Collector fixture. Do not rebuild NVIDIA
+base images or replace active user sandboxes to enable this diagnostic path.
 
 ## Windows Desktop Source Setup
 
@@ -351,6 +463,7 @@ creates temporary resources; it is not an installer for an existing Desktop owne
 | Hyperbrowser SDK and file APIs | Same Linux setup | `--hyperbrowser` | 26; `hyperbrowser.json` |
 | Actual Argide browser functions | Linux setup plus the private kit and derived owner | `--argide` | 23; `argide.json` |
 | Actual Argide widget and model | Above plus isolated backend, product seed, and a funded Gemini key | `--argide --argide-widget` | 28; `argide-widget.json`, `argide-widget.png` |
+| Browser CTF with FUSE persistence | Linux setup, local TLS PostgreSQL fixture, FUSE image overlay, and OpenRouter key | `--ctf-fuse` | Both judges accept; six files retain matching hashes after owner recreation |
 
 Each count includes the Kernel checks. Choose one row; do not combine the SDK
 flag with the Argide flags and expect the same count. None of these tests proves
@@ -782,7 +895,8 @@ It verifies:
 2. eight filesystem conformance cases;
 3. fsynced sentinel durability;
 4. critical daemon exit causing container restart and lease-epoch advance;
-5. persistence after sandbox delete/recreate with the same workspace ID.
+5. persistence of the fsynced sentinel after sandbox delete/recreate with the
+   same workspace ID.
 
 The crash-restart assertion uses Docker inspection and therefore intentionally targets
 the v1 Docker driver.
@@ -826,6 +940,104 @@ The fixture PostgreSQL server must present a TLS certificate chaining to `ca.crt
 route; it does not disable PostgreSQL TLS. Point `OPENRIND_SHELL_FUSE_E2E_IMAGE`
 at the derived tag when running the E2E, and tear the fixture down with
 `docker compose -f tests/fuse/postgres-fixture/docker-compose.yml down -v`.
+
+## FUSE-Backed Browser CTF Test
+
+This test runs the real CTF browser agent inside a disposable primary FUSE owner.
+It uses the local OpenShell gateway from the browser-pod fixture and the local
+TLS PostgreSQL fixture above. It does not use a Desktop owner or a customer
+workspace. Run it on Linux x64 with the same local Docker daemon for the gateway
+and images. Confirm `docker info`, `docker context show`, and the matched
+OpenShell build first. The host needs `/dev/fuse`, a working `libz3.so.4` for the
+gateway, a free `127.0.0.1:19770`, and an `OPENROUTER_API_KEY` in the shell.
+
+Build the primary FUSE image and the local PostgreSQL overlay. Do not rebuild
+NVIDIA's base image:
+
+```bash
+docker build --pull=false -f Dockerfile.openrind-shell -t openrind-shell-fuse:local .
+tests/fuse/postgres-fixture/gen-certs.sh
+```
+
+Set a private, random `POSTGRES_PASSWORD` in
+`tests/fuse/postgres-fixture/.env` before starting Compose. Do not overwrite an
+existing local `.env`. The password must be URL-safe; hex characters work.
+
+```bash
+docker compose -f tests/fuse/postgres-fixture/docker-compose.yml up -d --wait
+set -a
+. tests/fuse/postgres-fixture/.env
+set +a
+export DATABASE_URL="postgresql://postgres:${POSTGRES_PASSWORD}@172.17.0.1:55432/postgres"
+docker build --pull=false \
+  -f tests/fuse/Dockerfile.local-postgres \
+  --build-arg BASE_IMAGE=openrind-shell-fuse:local \
+  --build-arg OPENERAL_TEST_DB_HOST=172.17.0.1 \
+  --build-arg OPENERAL_TEST_DB_PORT=55432 \
+  -t openrind-shell-fuse-localdb:test \
+  tests/fuse/postgres-fixture/context
+docker build --pull=false \
+  -f tests/fuse/Dockerfile.browser-ctf \
+  --build-arg BASE_IMAGE=openrind-shell-fuse-localdb:test \
+  -t openrind-shell-fuse-browser-ctf:test .
+```
+
+Build the browser pod and challenge images. Use the pinned Chromium package from
+the Real Linux Browser Test above:
+
+```bash
+docker build --pull=false -f sandboxes/browser-pod/Dockerfile \
+  --build-arg CHROMIUM_VERSION=154.0.8037.92-1~deb12u1 \
+  -t openrind-browser-pod:e2e sandboxes/browser-pod
+docker build --pull=false -f sandboxes/ctf-challenge/Dockerfile \
+  -t openrind-ctf-challenge:e2e .
+```
+
+Set `DATABASE_URL` and `OPENROUTER_API_KEY` in the shell. Use
+`openrind-shell-fuse-browser-ctf:test` as the owner image. This test-only overlay
+adds the trusted, non-secret `/etc/openrind-browser-pods/helper.json` config.
+The primary image stays unchanged. The runner creates a
+temporary FUSE owner with a unique `OPENRIND_SHELL_WORKSPACE_ID` and starts
+`openrind-shell-init`. It does not pass `--policy`, because that would replace
+the PostgreSQL route from the image. It attaches the browser provider, runs
+`helper-probe.mjs`, and adds the model and judge routes with incremental
+`openshell policy update` calls.
+
+Run both CTF tasks with the real model and browser pod:
+
+```bash
+CTF_FUSE_OWNER_IMAGE='openrind-shell-fuse-browser-ctf:test' \
+node openrind-desktop/packages/browser-pods/test/live/openshell-e2e.mjs --ctf-fuse
+```
+
+The runner uses `DATABASE_URL` and `OPENROUTER_API_KEY` from the environment. It
+writes the database URL to a mode-0600 temporary upload file and removes it and
+the host-side model-key files during cleanup. It does not print their values.
+GlacierExchange includes a guided exploit hint. The test checks browser execution,
+the independent judge, and FUSE persistence. It does not measure model skill.
+For a reasoning model that supports OpenRouter's reasoning setting, set
+`OPENRIND_CTF_REASONING_EFFORT=low` if it uses the full response budget before
+it returns the required JSON action. Do not set this option for unsupported
+models.
+After both judges accept, the runner calls
+`openrind-shell-fused flush-all` and hashes each task's trajectory, agent events,
+and exported per-run challenge events. It stops the broker, deletes the owner,
+and creates a replacement with the same workspace ID. It downloads all six
+files and requires each SHA-256 hash to match. The raw challenge pod log is
+separate evidence; the persisted challenge-events file is the run-scoped export
+written by the agent.
+
+Require exit code 0, `Result: passed`, accepted judge records, and a
+`ctfPersistence` entry in `evidence.json` with matching `hashesBefore` and
+`hashesAfter`. This proves that these real CTF outputs survived the tested FUSE
+flush and owner replacement. It does not prove Haloop capture, Desktop launch
+integration, or model-independent success. If either model run fails, report
+that result. Do not replace agent output or inject a flag. Tear down the local
+database fixture with:
+
+```bash
+docker compose -f tests/fuse/postgres-fixture/docker-compose.yml down -v
+```
 
 ## Compatibility And Library Tests
 

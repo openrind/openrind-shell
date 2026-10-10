@@ -1,0 +1,9 @@
+ARG BASE_IMAGE=openrind-shell-fuse-localdb:test
+FROM ${BASE_IMAGE}
+
+USER root
+RUN install -d -o root -g root -m 0755 /etc/openrind-browser-pods \
+    && printf '%s\n' '{"brokerOrigin":"http://host.openshell.internal:19301","generation":"openshell-e2e"}' \
+       > /etc/openrind-browser-pods/helper.json \
+    && chown root:root /etc/openrind-browser-pods/helper.json \
+    && chmod 0644 /etc/openrind-browser-pods/helper.json

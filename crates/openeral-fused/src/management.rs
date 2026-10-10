@@ -59,3 +59,27 @@ pub async fn client(socket_path: &Path, command: &str) -> Result<serde_json::Val
     }
     Ok(serde_json::from_slice(&response)?)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::RuntimeState;
+
+    #[tokio::test]
+    async fn health_exposes_content_free_counters_over_the_management_socket() {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = RuntimeState::new("test".into(), directory.path().into());
+        let core = FilesystemCore::new(tokio::runtime::Handle::current(), runtime);
+        let (server, mut stream) = UnixStream::pair().unwrap();
+        let server = tokio::spawn(handle_client(core, server));
+        stream.write_all(b"health\n").await.unwrap();
+        stream.shutdown().await.unwrap();
+        let mut line = String::new();
+        BufReader::new(stream).read_line(&mut line).await.unwrap();
+        let health: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(health["state"], "initializing");
+        assert_eq!(health["diagnostics"]["version"], 1);
+        assert_eq!(health["diagnostics"]["requestsCompleted"], 0);
+        server.await.unwrap().unwrap();
+    }
+}

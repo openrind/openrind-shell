@@ -90,6 +90,21 @@ Linux Browser Test**. Do not apply a test broker configuration to a customer own
 For the private kit, use BUILD's **Actual Argide Application Test** after the
 public browser test. Do not import Argide's test services into Desktop setup.
 
+## Managed Runtime Diagnostics
+
+Desktop requests a managed diagnostic route at launch. The supplied Haloop
+release has no matching route or OTLP receiver, so it reports unsupported.
+Required inference routing remains unchanged. A valid route enables lazy SDK
+loading, content-free lifecycle spans, and sampled FUSE health. There is no new
+WSL service. Environment variables do not activate this Desktop path. Do not
+put host credentials in the owner or replace a live image to obtain counters.
+
+Use `openrind-capture` for setup and tests. Check `runtimeDiagnostics` in Haloop
+status and receiver-side spans before reporting delivery. New FUSE daemons add
+process-local counters to `health`; old daemons work without counters. Same-UID
+health is not trusted execution evidence. FUSE flush and telemetry flush are
+independent. Full content capture and durable telemetry remain unimplemented.
+
 ## Persistence and safety
 
 - `/sandbox/work` is PostgreSQL-backed FUSE, not a watched or mirrored folder.

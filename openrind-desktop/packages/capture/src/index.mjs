@@ -59,6 +59,7 @@ export function createCapture(options) {
   let sequence = 0;
   let stagedLogs;
   let lastSpanAccepted;
+  /** @type {Promise<void | ReturnType<typeof status>>} */
   let flushTail = Promise.resolve();
   let shutdownTask;
   const reject = (reason) => {
@@ -145,6 +146,8 @@ export function createCapture(options) {
     });
   }
 
+  /** @param {{data?: string | Uint8Array, mediaType?: string, type?: string,
+   * source?: string, attributes?: Record<string, string | number | boolean>, traceparent?: string}} [input] */
   function recordPayload({ data, mediaType = "application/octet-stream", type = "application.payload",
     source = "application", attributes: extra = {}, traceparent } = {}) {
     assertOpen();
@@ -189,6 +192,8 @@ export function createCapture(options) {
     } finally { stagedLogs = undefined; }
   }
 
+  /** @param {{name?: string, startMs?: number, endMs?: number, status?: string,
+   * attributes?: Record<string, string | number | boolean>, traceparent?: string}} [input] */
   function recordOperation({ name, startMs, endMs = Date.now(), status: outcome = "unset",
     attributes: extra = {}, traceparent } = {}) {
     assertOpen();
