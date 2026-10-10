@@ -233,11 +233,13 @@ export function useBrowserStore(conversationId: string, sandboxName?: string) {
 
   const closeTab = useCallback((pageId: string) => {
     let targetUrlToNav: string | null = null;
+    let targetActiveId: string | null = null;
     setState(s => {
       const remaining = s.tabs.filter(t => t.pageId !== pageId);
       if (remaining.length === 0) {
         const defaultTab: BrowserTab = { pageId: 'bp_main', url: 'about:blank', title: 'New Tab', documentGeneration: 1 };
         targetUrlToNav = 'about:blank';
+        targetActiveId = 'bp_main';
         return {
           ...s,
           tabs: [defaultTab],
@@ -248,6 +250,7 @@ export function useBrowserStore(conversationId: string, sandboxName?: string) {
       const nextActive = s.activeTabId === pageId ? remaining[remaining.length - 1].pageId : s.activeTabId;
       const nextTab = remaining.find(t => t.pageId === nextActive) || remaining[0];
       targetUrlToNav = nextTab.url;
+      targetActiveId = nextActive;
       return {
         ...s,
         tabs: remaining,
@@ -256,7 +259,7 @@ export function useBrowserStore(conversationId: string, sandboxName?: string) {
       };
     });
     if (targetUrlToNav !== null && stateRef.current.viewId && electron?.browser?.navigate) {
-      void navigate(targetUrlToNav, nextActive);
+      void navigate(targetUrlToNav, targetActiveId || undefined);
     }
   }, [electron, navigate]);
 

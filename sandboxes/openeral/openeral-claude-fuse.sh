@@ -7,6 +7,13 @@ if [ -f "$RUNTIME_DIR/session.env" ]; then
   . "$RUNTIME_DIR/session.env"
 fi
 
+if [ -f "$RUNTIME_DIR/haloop-context.env" ]; then
+  # shellcheck disable=SC1090
+  . "$RUNTIME_DIR/haloop-context.env"
+fi
+
+export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-sk-ant-openrind-session-token}"
+
 export HOME="${OPENRIND_SHELL_CLAUDE_HOME:-/sandbox/claude-home}"
 export PATH="$HOME/.local/bin:${PATH:-/usr/local/bin:/usr/bin:/bin}"
 export OPENRIND_SHELL_HOME=/sandbox/work

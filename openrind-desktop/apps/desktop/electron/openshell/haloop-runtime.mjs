@@ -834,10 +834,12 @@ async function requireHaloopImages(run) {
     }
     return { gateway, collector, remote: false };
   } catch (error) {
-    const isRemoteConfigured = process.env.OPENRIND_HALOOP_REMOTE === "1" || process.env.OPENRIND_ALLOW_REMOTE_HALOOP === "1";
+    const isRemoteConfigured =
+      process.env.OPENRIND_HALOOP_REMOTE === "1" ||
+      process.env.OPENRIND_ALLOW_REMOTE_HALOOP === "1";
     if (!isRemoteConfigured) {
       throw new Error(
-        `Haloop local image verification failed: ${error.message}. Build or make local images available, or explicitly set OPENRIND_ALLOW_REMOTE_HALOOP=1 to permit remote gateway operation.`,
+        `Haloop local image verification failed: ${error.message}. Build or make local images available, or set OPENRIND_ALLOW_REMOTE_HALOOP=1 to permit remote gateway operation.`,
       );
     }
     console.log(
@@ -1802,6 +1804,18 @@ export function createHaloopRuntimeManager({
               contextId: options.haloopContextId,
             })
           : null;
+        lastReadyRoute = {
+          gatewayProfileHash: "remote",
+          profileId: registration.current.id,
+          providerName: registration.current.providerName,
+          sandboxName: options.sandboxName,
+          workspaceId: options.workspaceId,
+          agentId: options.agentId,
+          upstreamMode: upstream.mode,
+          analysisConfigHash: "remote",
+          remote: true,
+        };
+        await persistReadyRoute(lastReadyRoute);
         return {
           endpoint: HALOOP_SANDBOX_ENDPOINT,
           routePolicy: HALOOP_ROUTE_POLICY,
@@ -2053,7 +2067,7 @@ export function createHaloopRuntimeManager({
           endpoint: HALOOP_SANDBOX_ENDPOINT,
           version: "remote",
           health: { ok: true },
-          collectorHealth: { ok: true },
+          collectorHealth: null,
           activeRoute: lastReadyRoute,
           detail: `Routing via remote Haloop gateway at ${HALOOP_SANDBOX_ENDPOINT}.`,
           lastConnectionError: null,

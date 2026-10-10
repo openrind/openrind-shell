@@ -117,8 +117,8 @@ def install_session_transport(context, base_url=None):
             kwargs['follow_redirects'] = False
         return await async_send(client, request, *args, **kwargs)
 
-    httpx.Client.send = send_scoped
-    httpx.AsyncClient.send = async_send_scoped
+    setattr(httpx.Client, 'send', send_scoped)
+    setattr(httpx.AsyncClient, 'send', async_send_scoped)
 
 
 def main():

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { lookup as dnsLookup } from "node:dns/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import https from "node:https";
 import net from "node:net";
 import {
@@ -17,6 +17,28 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+function loadDotenv(filePath) {
+  if (!existsSync(filePath)) return;
+  try {
+    const content = readFileSync(filePath, "utf8");
+    for (const line of content.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const idx = trimmed.indexOf("=");
+      if (idx <= 0) continue;
+      const key = trimmed.slice(0, idx).trim();
+      const val = trimmed.slice(idx + 1).trim().replace(/^['"]|['"]$/g, "");
+      if (key && !(key in process.env)) {
+        process.env[key] = val;
+      }
+    }
+  } catch {}
+}
+
+const __mainDir = path.dirname(fileURLToPath(import.meta.url));
+loadDotenv(path.resolve(__mainDir, "../../../.env"));
+loadDotenv(path.resolve(__mainDir, "../.env"));
 
 import {
   app,

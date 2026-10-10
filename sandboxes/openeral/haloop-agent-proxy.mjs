@@ -4,6 +4,7 @@ import https from 'node:https';
 import fs from 'node:fs';
 import { URL } from 'node:url';
 import { randomBytes } from 'node:crypto';
+import { Readable } from 'node:stream';
 
 process.on('uncaughtException', err => {
   console.error('PROXY UNCAUGHT EXCEPTION:', err);
@@ -12,31 +13,42 @@ process.on('unhandledRejection', err => {
   console.error('PROXY UNHANDLED REJECTION:', err);
 });
 
-let targetBase = process.env.HALOOP_UPSTREAM_URL || process.env.HALOOP_GATEWAY_URL || '';
+const AUTHORIZED_GATEWAY_HOSTS = new Set([
+  '136.112.93.84',
+  'host.openshell.internal',
+  '127.0.0.1',
+  'localhost',
+  '136.123.45.67'
+]);
+
+let targetBase = process.env.HALOOP_UPSTREAM_URL || process.env.HALOOP_GATEWAY_URL || 'http://host.openshell.internal:8787';
 if (!targetBase) {
   targetBase = 'http://host.openshell.internal:8787';
 }
 const targetUrl = new URL(targetBase);
+const isHttps = targetUrl.protocol === 'https:';
 const isLoopbackOrInternal = targetUrl.hostname === '127.0.0.1' ||
   targetUrl.hostname === 'localhost' ||
   targetUrl.hostname === 'host.openshell.internal';
-const isHttps = targetUrl.protocol === 'https:';
 const isSecureUpstream = isHttps || isLoopbackOrInternal;
-if (!isSecureUpstream && targetUrl.protocol === 'http:') {
-  console.warn(`[haloop-proxy] Plaintext remote upstream rejected: ${targetBase}`);
+const isAuthorizedHost = isSecureUpstream || AUTHORIZED_GATEWAY_HOSTS.has(targetUrl.hostname);
+if (!isAuthorizedHost) {
+  console.error(`[haloop-proxy] Refusing to start with unauthorized gateway host: ${targetUrl.hostname}`);
+  process.exit(1);
 }
 const client = isHttps ? https : http;
 
 const proxyEnv = process.env.HTTP_PROXY || process.env.http_proxy || process.env.ALL_PROXY || process.env.all_proxy;
 const proxyUrl = proxyEnv ? new URL(proxyEnv) : null;
 
-const openRouterKey = (process.env.OPENROUTER_API_KEY || '').trim();
-const anthropicKey = (process.env.ANTHROPIC_API_KEY || '').trim();
-const isOpenRouterKey = Boolean(openRouterKey) || anthropicKey.startsWith('sk-or-') || (process.env.W8_HALOOP_PROVIDER === 'openrouter');
-const defaultKey = isOpenRouterKey ? (openRouterKey || anthropicKey) : (anthropicKey || openRouterKey);
-const provider = isOpenRouterKey ? 'openrouter' : (process.env.W8_HALOOP_PROVIDER || 'anthropic');
+let openRouterKey = (process.env.OPENROUTER_API_KEY || '').trim();
+let anthropicKey = (process.env.ANTHROPIC_API_KEY || '').trim();
+
+const isOpenRouterKey = Boolean(openRouterKey) || anthropicKey.startsWith('sk-or-');
+const defaultKey = openRouterKey || anthropicKey || '';
+const provider = isOpenRouterKey ? 'openrouter' : 'anthropic';
 const adminToken = process.env.ADMIN_TOKEN || process.env.W8_BYOH_ADMIN_TOKEN || '';
-const defaultModel = process.env.OPENROUTER_MODEL || process.env.LLM_MODEL || process.env.OPENRIND_SHELL_OPENHANDS_MODEL || 'openrouter/free';
+const defaultModel = process.env.OPENROUTER_MODEL || process.env.LLM_MODEL || 'openrouter/auto';
 
 function resolveProjectName() {
   let raw = (
@@ -55,44 +67,55 @@ function resolveProjectName() {
   return raw.replace(/^or-/, '') || 'default';
 }
 
-function sendUpstream(reqPath, reqMethod, reqHeaders, callback) {
-  const headers = { ...reqHeaders, host: targetUrl.host };
+function sendUpstream(reqPath, reqMethod, reqHeaders, reqBody, callback) {
+  if (typeof reqBody === 'function') {
+    callback = reqBody;
+    reqBody = undefined;
+  }
+  const fullUrl = `${targetUrl.protocol}//${targetUrl.host}${reqPath}`;
+  const headers = { ...reqHeaders };
+  delete headers['host'];
+  delete headers['connection'];
+  delete headers['keep-alive'];
+  delete headers['transfer-encoding'];
+  delete headers['content-length'];
 
-  // When NODE_USE_ENV_PROXY=1 is active (Node 22 built-in proxy agent),
-  // client.request automatically tunnels through HTTP_PROXY to targetUrl.hostname:targetUrl.port.
-  // Passing targetUrl directly ensures port 8787 is preserved and not overwritten with proxy port 3128.
-  if (process.env.NODE_USE_ENV_PROXY === '1') {
-    return client.request({
-      protocol: targetUrl.protocol,
-      hostname: targetUrl.hostname,
-      port: targetUrl.port || (isHttps ? 443 : 80),
-      path: reqPath,
-      method: reqMethod,
-      headers,
-    }, callback);
+  if (reqBody) {
+    headers['content-length'] = String(Buffer.byteLength(reqBody));
   }
 
-  // Fallback if NODE_USE_ENV_PROXY is not active and proxyUrl is defined
-  if (proxyUrl && targetUrl.protocol === 'http:') {
-    const fullUrl = `${targetUrl.protocol}//${targetUrl.host}${reqPath}`;
-    return http.request({
-      protocol: proxyUrl.protocol,
-      hostname: proxyUrl.hostname,
-      port: proxyUrl.port,
-      path: fullUrl,
-      method: reqMethod,
-      headers,
-    }, callback);
-  }
-
-  return client.request({
-    protocol: targetUrl.protocol,
-    hostname: targetUrl.hostname,
-    port: targetUrl.port || (isHttps ? 443 : 80),
-    path: reqPath,
+  fetch(fullUrl, {
     method: reqMethod,
     headers,
-  }, callback);
+    body: reqBody && ['POST', 'PUT', 'PATCH'].includes(reqMethod) ? reqBody : undefined,
+    redirect: 'manual',
+  }).then(upstreamRes => {
+    let nodeStream;
+    if (upstreamRes.body) {
+      nodeStream = Readable.fromWeb(upstreamRes.body);
+    } else {
+      nodeStream = new Readable({ read() { this.push(null); } });
+    }
+    nodeStream.statusCode = upstreamRes.status;
+    const downstreamHeaders = Object.fromEntries(upstreamRes.headers.entries());
+    delete downstreamHeaders['content-encoding'];
+    delete downstreamHeaders['content-length'];
+    delete downstreamHeaders['transfer-encoding'];
+    nodeStream.headers = downstreamHeaders;
+    callback(nodeStream);
+  }).catch(err => {
+    console.error('sendUpstream fetch error:', err.message);
+    const mockRes = new Readable({ read() { this.push(null); } });
+    mockRes.statusCode = 502;
+    mockRes.headers = { 'content-type': 'application/json' };
+    callback(mockRes);
+  });
+
+  return {
+    on() {},
+    end() {},
+    write() {},
+  };
 }
 
 function anthropicToOpenAiMessages(body) {
@@ -233,15 +256,20 @@ const server = http.createServer((req, res) => {
 
     const isMessages = req.url === '/v1/messages' || req.url?.startsWith('/v1/messages');
     const isStream = Boolean(body?.stream);
+    const projectName = resolveProjectName();
+    const collectorUrl = process.env.HALOOP_COLLECTOR_URL || 'http://136.112.93.84:8788';
+    let sessionContext = req.headers['x-openrind-haloop-session'] || process.env.OPENRIND_HALOOP_SESSION_CONTEXT || '';
 
-    // If using OpenRouter, adapt /v1/messages to OpenRouter /v1/chat/completions
-    if (isMessages && body && isOpenRouterKey) {
+    // If using OpenRouter with a valid key, adapt /v1/messages to OpenRouter /v1/chat/completions
+    if (isMessages && body && isOpenRouterKey && (openRouterKey || anthropicKey.startsWith('sk-or-'))) {
       const clientToolNames = Array.isArray(body?.tools) ? body.tools.map(t => t.name) : [];
       const chosenModel = process.env.OPENROUTER_MODEL || process.env.LLM_MODEL || defaultModel;
       const candidates = [
         chosenModel,
-        'nvidia/nemotron-3-super-120b-a12b:free',
-        'qwen/qwen3.8-27b:free'
+        'openrouter/auto',
+        'meta-llama/llama-3.3-70b-instruct',
+        'deepseek/deepseek-chat',
+        'qwen/qwen-2.5-72b-instruct'
       ];
       const fallbackModels = [...new Set(candidates)].slice(0, 3);
       const openAiMessages = anthropicToOpenAiMessages(body);
@@ -258,9 +286,7 @@ const server = http.createServer((req, res) => {
       }
       const openAiPayload = JSON.stringify(payloadObj);
 
-      const projectName = resolveProjectName();
-      const collectorUrl = process.env.HALOOP_COLLECTOR_URL || 'http://136.112.93.84:8788';
-      const sessionContext = process.env.OPENRIND_HALOOP_SESSION_CONTEXT || req.headers['x-openrind-haloop-session'] || '';
+      const authKey = openRouterKey || defaultKey || '';
       const forwardHeaders = {
         'content-type': 'application/json',
         'content-length': Buffer.byteLength(openAiPayload),
@@ -273,21 +299,17 @@ const server = http.createServer((req, res) => {
         }),
       };
 
-      if (sessionContext) {
-        forwardHeaders['x-openrind-haloop-session'] = sessionContext;
-      }
-
-      const isSecureUpstream = isHttps || targetUrl.hostname === '127.0.0.1' || targetUrl.hostname === 'localhost' || targetUrl.hostname === 'host.openshell.internal';
-      const authKey = openRouterKey || defaultKey;
       if (authKey && isSecureUpstream) {
-        forwardHeaders['authorization'] = authKey.startsWith('Bearer ')
-          ? authKey
-          : `Bearer ${authKey}`;
+        forwardHeaders['authorization'] = authKey.startsWith('Bearer ') ? authKey : `Bearer ${authKey}`;
         forwardHeaders['x-api-key'] = authKey;
         forwardHeaders['x-w8-haloop-api-key'] = authKey;
       }
 
-      const upstream = sendUpstream('/v1/chat/completions', 'POST', forwardHeaders, upstreamRes => {
+      if (sessionContext && isSecureUpstream) {
+        forwardHeaders['x-openrind-haloop-session'] = sessionContext;
+      }
+
+      sendUpstream('/v1/chat/completions', 'POST', forwardHeaders, openAiPayload, upstreamRes => {
         upstreamRes.on('error', err => {
           console.error('Upstream response stream error:', err.message);
           if (!res.headersSent) {
@@ -585,31 +607,13 @@ const server = http.createServer((req, res) => {
         }
       });
 
-      upstream.on('error', err => {
-        if (!res.headersSent) {
-          res.writeHead(502, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ error: { message: err.message, type: 'haloop_proxy_error' } }));
-        } else {
-          res.end();
-        }
-      });
-
-      upstream.end(openAiPayload);
       return;
     }
 
     // Default passthrough for other routes or if using native anthropic key
-    const projectName = resolveProjectName();
-    const collectorUrl = process.env.HALOOP_COLLECTOR_URL || 'http://136.112.93.84:8788';
-    const sessionContext = process.env.OPENRIND_HALOOP_SESSION_CONTEXT || req.headers['x-openrind-haloop-session'] || '';
     const headers = { ...req.headers };
-    delete headers['authorization'];
-    delete headers['x-api-key'];
     delete headers['host'];
-    for (const k of Object.keys(headers)) {
-      if (k.toLowerCase().startsWith('x-w8-haloop-')) delete headers[k];
-    }
-    headers['x-w8-haloop-provider'] = provider;
+    headers['x-w8-haloop-provider'] = isMessages ? 'anthropic' : provider;
     if (adminToken && isSecureUpstream) {
       headers['x-w8-haloop-admin-token'] = adminToken;
     }
@@ -619,36 +623,22 @@ const server = http.createServer((req, res) => {
       output_guardrails: [{ 'halo.export': { collectorURL: collectorUrl, defaultProject: projectName }, async: false, deny: false }],
     });
 
-    if (sessionContext) {
+    if (sessionContext && isSecureUpstream) {
       headers['x-openrind-haloop-session'] = sessionContext;
     }
 
-    if (defaultKey && isSecureUpstream) {
-      headers['authorization'] = defaultKey.startsWith('Bearer ')
-        ? defaultKey
-        : `Bearer ${defaultKey}`;
-      headers['x-api-key'] = defaultKey;
-      headers['x-w8-haloop-api-key'] = defaultKey;
+    const rawKey = defaultKey || req.headers['authorization'] || req.headers['x-api-key'] || '';
+    const isPlaceholder = rawKey.includes('openrind-session-token') || rawKey.includes('simulation-admin');
+    if (rawKey && !isPlaceholder && isSecureUpstream) {
+      headers['authorization'] = rawKey.startsWith('Bearer ') ? rawKey : `Bearer ${rawKey}`;
+      headers['x-api-key'] = rawKey;
+      headers['x-w8-haloop-api-key'] = rawKey;
     }
 
-    const clientReq = sendUpstream(req.url, req.method, headers, clientRes => {
+    sendUpstream(req.url, req.method, headers, rawBody.length > 0 ? rawBody : undefined, clientRes => {
       res.writeHead(clientRes.statusCode || 500, clientRes.headers);
       clientRes.pipe(res);
     });
-
-    clientReq.on('error', err => {
-      if (!res.headersSent) {
-        res.writeHead(502, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ error: { message: err.message, type: 'haloop_proxy_error' } }));
-      } else {
-        res.end();
-      }
-    });
-
-    if (rawBody.length > 0) {
-      clientReq.write(rawBody);
-    }
-    clientReq.end();
   });
 });
 
