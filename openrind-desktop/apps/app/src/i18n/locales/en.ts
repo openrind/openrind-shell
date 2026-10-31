@@ -1024,6 +1024,7 @@ export default {
   "question_modal.custom_answer_placeholder": "Type your answer here...",
   "question_modal.question_counter": "Question {current} of {total}",
   "sandbox.agent_claude": "Claude Code",
+  "sandbox.agent_codex": "Codex CLI",
   "sandbox.agent_label": "Agent",
   "sandbox.agent_openclaw": "OpenClaw",
   "sandbox.auth_missing_desc": "The required Haloop edge needs an upstream Anthropic API key. Desktop keeps it outside the sandbox; set it before creating Claude or OpenClaw sandboxes.",

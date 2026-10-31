@@ -372,8 +372,122 @@ test('openrouter streaming captures chunk usage and maps finish_reason in messag
     assert.ok(res.raw.includes('event: message_delta'));
     // Stop reason must be mapped from 'length' to 'max_tokens'
     assert.ok(res.raw.includes('"stop_reason":"max_tokens"'));
-    // Usage in message_delta must use provider completion_tokens (45)
+    // Usage in message_delta must use provider completion_tokens (45) and input_tokens (15)
     assert.ok(res.raw.includes('"output_tokens":45'));
+    assert.ok(res.raw.includes('"input_tokens":15'));
+  } finally {
+    await proxy.close();
+    await upstream.close();
+  }
+});
+
+test('thinking signatures and unknown blocks survive message conversion', () => {
+  const anthropicBody = {
+    messages: [
+      {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'Analyzing the DOM structure', signature: 'sig_abc123xyz' },
+          { type: 'text', text: 'Ready to proceed.' },
+          { type: 'custom_metadata_block', data: 'opaque_token_val' },
+        ],
+      },
+    ],
+  };
+
+  const openAiMessages = anthropicToOpenAiMessages(anthropicBody);
+  assert.equal(openAiMessages.length, 1);
+  assert.equal(openAiMessages[0].role, 'assistant');
+  assert.equal(openAiMessages[0].content, 'Ready to proceed.');
+  assert.equal(openAiMessages[0].reasoning, 'Analyzing the DOM structure');
+  assert.equal(openAiMessages[0].reasoning_signature, 'sig_abc123xyz');
+  assert.ok(Array.isArray(openAiMessages[0].custom_content_blocks));
+  assert.equal(openAiMessages[0].custom_content_blocks[0].type, 'custom_metadata_block');
+});
+
+test('proxy forwards tool_choice and custom top-level request parameters', async () => {
+  let receivedBody = null;
+
+  const upstream = await startMockUpstream((req, res) => {
+    let chunks = [];
+    req.on('data', c => chunks.push(c));
+    req.on('end', () => {
+      receivedBody = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        id: 'chatcmpl-tool-choice',
+        model: 'upstream-model',
+        choices: [{ index: 0, message: { role: 'assistant', content: 'acknowledged' } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      }));
+    });
+  });
+
+  const proxy = await startProxy({
+    targetBase: upstream.url,
+    isOpenRouterKey: true,
+    openRouterKey: 'sk-or-test-key',
+  });
+
+  try {
+    const res = await postJson(proxy.url, '/v1/messages', {
+      model: 'test-model',
+      messages: [{ role: 'user', content: 'test tool choice' }],
+      tool_choice: { type: 'tool', name: 'browser' },
+      custom_vendor_param: 'preserved_value',
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(receivedBody.tool_choice, { type: 'function', function: { name: 'browser' } });
+    assert.equal(receivedBody.custom_vendor_param, 'preserved_value');
+  } finally {
+    await proxy.close();
+    await upstream.close();
+  }
+});
+
+test('non-streaming response with both text and reasoning preserves thinking block and missing usage', async () => {
+  const upstream = await startMockUpstream((req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({
+      id: 'chatcmpl-reasoning',
+      model: 'upstream-reasoner',
+      choices: [{
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: 'Here is the result.',
+          reasoning: 'I thought through the problem carefully.',
+        },
+        finish_reason: 'stop',
+      }],
+      // Notice: usage is intentionally omitted to verify missing usage fidelity
+    }));
+  });
+
+  const proxy = await startProxy({
+    targetBase: upstream.url,
+    isOpenRouterKey: true,
+    openRouterKey: 'sk-or-test-key',
+  });
+
+  try {
+    const res = await postJson(proxy.url, '/v1/messages', {
+      model: 'test-model',
+      messages: [{ role: 'user', content: 'solve this' }],
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.content.length, 2);
+    assert.equal(res.body.content[0].type, 'thinking');
+    assert.equal(res.body.content[0].thinking, 'I thought through the problem carefully.');
+    assert.equal(res.body.content[1].type, 'text');
+    assert.equal(res.body.content[1].text, 'Here is the result.');
+
+    // Missing usage is reported honestly without faking 0/0
+    assert.equal(res.body.usage.missing, true);
+    assert.equal(res.body.usage.input_tokens, null);
+    assert.equal(res.body.usage.output_tokens, null);
   } finally {
     await proxy.close();
     await upstream.close();

@@ -16,6 +16,8 @@
 //   source-records/
 
 import { createHash, randomBytes } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { basename } from "node:path";
 import { createZipBuffer } from "./harbor-exporter.mjs";
 
 const TRACEPACK_SCHEMA_VERSION = "1.0.0";
@@ -59,9 +61,10 @@ export function buildTracePackFiles({
   const task = trajectory.task || {};
   const taskId = task.id || "challenge";
   const startedAt = trajectory.startedAt || new Date().toISOString();
-  const traceId = stableTraceId(trajectory.runId || trajectory.id || `${taskId}-${startedAt}`);
+  const runId = trajectory.runId || trajectory.id || `${taskId}-${startedAt}`;
+  const traceId = stableTraceId(runId);
   const rootSpanId = stableSpanId(`root-${traceId}`);
-  const sessionId = `${taskId}:${traceId.slice(0, 12)}`;
+  const sessionId = trajectory.sessionId || `${taskId}:${traceId.slice(0, 12)}`;
 
   const files = [];
   const artifactsMap = {};
@@ -90,32 +93,70 @@ export function buildTracePackFiles({
     return hash;
   }
 
-  // 2. Build Events & Conversation from Steps / Events
+  // 2. Build Events & Conversation from Source Records / Steps
   const steps = Array.isArray(trajectory.steps) ? trajectory.steps : [];
 
-  // System message turn
-  conversationLines.push(JSON.stringify({
-    role: "system",
-    content: `You are an Openrind CTF browser agent. Target: ${task.title || taskId}. ${task.description || ""}`,
-    timestamp: startedAt,
-    sequence: sequenceNumber++,
-  }));
+  // Check if actual observed model requests are present in agentEvents
+  const modelCalls = (Array.isArray(agentEvents) ? agentEvents : [])
+    .filter(e => (e.kind === "model_call" || e.kind === "model_request") && (e.request?.messages || e.messages));
+  const firstModelCall = modelCalls[0];
+  const observedReqMessages = firstModelCall?.request?.messages || firstModelCall?.messages;
 
-  // Initial user prompt
-  conversationLines.push(JSON.stringify({
-    role: "user",
-    content: `Solve the challenge: ${task.title || taskId}.`,
-    timestamp: startedAt,
-    sequence: sequenceNumber++,
-  }));
+  let hasObservedModelContext = false;
+
+  if (Array.isArray(observedReqMessages) && observedReqMessages.length > 0) {
+    hasObservedModelContext = true;
+    for (const msg of observedReqMessages) {
+      if (msg.role === "system") {
+        conversationLines.push(JSON.stringify({
+          role: "system",
+          content: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
+          timestamp: firstModelCall.at || startedAt,
+          sequence: sequenceNumber++,
+          provenance: "observed_model_request",
+        }));
+      } else if (msg.role === "user" && conversationLines.length <= 1) {
+        conversationLines.push(JSON.stringify({
+          role: "user",
+          content: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
+          timestamp: firstModelCall.at || startedAt,
+          sequence: sequenceNumber++,
+          provenance: "observed_model_request",
+        }));
+      }
+    }
+  }
+
+  // Fallback if no observed model request message turn was found
+  if (conversationLines.length === 0) {
+    conversationLines.push(JSON.stringify({
+      role: "system",
+      content: `You are an Openrind CTF browser agent. Target: ${task.title || taskId}. ${task.description || ""}`,
+      timestamp: startedAt,
+      sequence: sequenceNumber++,
+      derived: true,
+      provenance: "derived_from_task",
+    }));
+
+    conversationLines.push(JSON.stringify({
+      role: "user",
+      content: `Solve the challenge: ${task.title || taskId}.`,
+      timestamp: startedAt,
+      sequence: sequenceNumber++,
+      derived: true,
+      provenance: "derived_from_task",
+    }));
+  }
 
   // Process Agent Events if available; otherwise derive from trajectory steps
   if (Array.isArray(agentEvents) && agentEvents.length > 0) {
     for (const rawEvt of agentEvents) {
       const evtId = `evt-${sequenceNumber}`;
       const evtTime = rawEvt.at || startedAt;
-      const producer = rawEvt.kind?.startsWith("browser") ? "browser" :
-                       rawEvt.kind?.startsWith("model") ? "inference-gateway" : "agent";
+      const producer = "agent";
+      const origin = rawEvt.origin || "agent";
+      const observer = rawEvt.observer || (rawEvt.kind?.startsWith("browser") ? "browser" : "agent");
+      const relayedBy = rawEvt.kind?.startsWith("model") ? "inference-gateway" : null;
 
       let artifactRef = null;
       if (rawEvt.observation && String(rawEvt.observation).length > 2048) {
@@ -129,6 +170,9 @@ export function buildTracePackFiles({
         trace_id: traceId,
         parent_id: rootSpanId,
         producer,
+        origin,
+        observer,
+        ...(relayedBy ? { relayed_by: relayedBy } : {}),
         kind: rawEvt.kind,
         details: {
           ...rawEvt,
@@ -171,6 +215,23 @@ export function buildTracePackFiles({
       obsArtifact = recordArtifact(`step-${i + 1}-obs.txt`, obsText, "text/plain");
     }
 
+    // Preserve rawObservation separately if present and different from model-visible observation
+    const rawObs = String(step.rawObservation ?? "");
+    let rawObsArtifact = null;
+    if (rawObs && rawObs !== obsText && rawObs.length > 2048) {
+      rawObsArtifact = recordArtifact(`step-${i + 1}-raw-obs.txt`, rawObs, "text/plain");
+    }
+
+    // Check for screenshot binary files on disk to preserve them in the archive
+    let screenshotArtifact = null;
+    const screenshotPath = step.screenshot?.path || step.screenshot_path || step.screenshotPath;
+    if (screenshotPath && existsSync(screenshotPath)) {
+      try {
+        const pngBuf = readFileSync(screenshotPath);
+        screenshotArtifact = recordArtifact(basename(screenshotPath), pngBuf, "image/png");
+      } catch {}
+    }
+
     conversationLines.push(JSON.stringify({
       role: "user",
       content: obsText,
@@ -178,6 +239,8 @@ export function buildTracePackFiles({
       step: step.number || i + 1,
       sequence: sequenceNumber++,
       ...(obsArtifact ? { artifact: obsArtifact } : {}),
+      ...(rawObsArtifact ? { raw_artifact: rawObsArtifact } : {}),
+      ...(screenshotArtifact ? { screenshot_artifact: screenshotArtifact } : {}),
     }));
 
     // If agentEvents wasn't provided, build eventLine from step
@@ -198,22 +261,41 @@ export function buildTracePackFiles({
       }));
     }
 
-    // OTLP Step Span
+    // OTLP Step Span (Standard OTLP JSON lowerCamelCase schema)
+    const stepStartMs = new Date(stepTime).getTime();
+    const stepDurationMs = Number(step.durationMs) || 100;
     otlpSpans.push({
-      trace_id: traceId,
-      span_id: stepSpanId,
-      parent_span_id: rootSpanId,
+      traceId,
+      spanId: stepSpanId,
+      parentSpanId: rootSpanId,
       name: `agent.step.${step.number || i + 1}`,
-      kind: "SPAN_KIND_INTERNAL",
-      start_time_unix_nano: new Date(stepTime).getTime() * 1_000_000,
-      end_time_unix_nano: (new Date(stepTime).getTime() + (Number(step.durationMs) || 100)) * 1_000_000,
+      kind: 1, // SPAN_KIND_INTERNAL
+      startTimeUnixNano: String(BigInt(stepStartMs) * 1000000n),
+      endTimeUnixNano: String(BigInt(stepStartMs + stepDurationMs) * 1000000n),
       attributes: [
-        { key: "openrind.task.id", value: { string_value: taskId } },
-        { key: "openrind.step.number", value: { int_value: step.number || i + 1 } },
-        { key: "openrind.step.tool", value: { string_value: step.tool || "browser" } },
+        { key: "openrind.task.id", value: { stringValue: taskId } },
+        { key: "openrind.step.number", value: { intValue: step.number || i + 1 } },
+        { key: "openrind.step.tool", value: { stringValue: step.tool || "browser" } },
       ],
       status: { code: 1 }, // STATUS_CODE_OK
     });
+  }
+
+  // Integrate Haloop Model Spans if provided
+  if (Array.isArray(haloopSpans) && haloopSpans.length > 0) {
+    for (const hSpan of haloopSpans) {
+      otlpSpans.push({
+        traceId,
+        spanId: hSpan.spanId || hSpan.span_id || stableSpanId(`haloop-${sequenceNumber++}`),
+        parentSpanId: rootSpanId,
+        name: hSpan.name || "haloop.model_call",
+        kind: 3, // SPAN_KIND_CLIENT
+        startTimeUnixNano: hSpan.startTimeUnixNano || String(BigInt(Date.now()) * 1000000n),
+        endTimeUnixNano: hSpan.endTimeUnixNano || String(BigInt(Date.now() + 500) * 1000000n),
+        attributes: Array.isArray(hSpan.attributes) ? hSpan.attributes : [],
+        status: hSpan.status || { code: 1 },
+      });
+    }
   }
 
   // 3. Challenge Server & Judge Events (Independent Provenance)
@@ -252,20 +334,21 @@ export function buildTracePackFiles({
     }));
   }
 
-  // 4. Root OTLP Span
+  // 4. Root OTLP Span (Standard OTLP JSON lowerCamelCase schema)
+  const rootStartMs = new Date(startedAt).getTime();
   const rootSpan = {
-    trace_id: traceId,
-    span_id: rootSpanId,
+    traceId,
+    spanId: rootSpanId,
     name: `openrind.ctf.${taskId}`,
-    kind: "SPAN_KIND_SERVER",
-    start_time_unix_nano: new Date(startedAt).getTime() * 1_000_000,
-    end_time_unix_nano: Date.now() * 1_000_000,
+    kind: 2, // SPAN_KIND_SERVER
+    startTimeUnixNano: String(BigInt(rootStartMs) * 1000000n),
+    endTimeUnixNano: String(BigInt(Date.now()) * 1000000n),
     attributes: [
-      { key: "openrind.task.id", value: { string_value: taskId } },
-      { key: "openrind.task.title", value: { string_value: task.title || taskId } },
-      { key: "openrind.model", value: { string_value: trajectory.model || "unknown" } },
-      { key: "openrind.solved", value: { bool_value: Boolean(trajectory.solved || trajectory.judge?.accepted) } },
-      { key: "service.name", value: { string_value: "openrind-ctf" } },
+      { key: "openrind.task.id", value: { stringValue: taskId } },
+      { key: "openrind.task.title", value: { stringValue: task.title || taskId } },
+      { key: "openrind.model", value: { stringValue: trajectory.model || "unknown" } },
+      { key: "openrind.solved", value: { boolValue: Boolean(trajectory.solved || trajectory.judge?.accepted) } },
+      { key: "service.name", value: { stringValue: "openrind-ctf" } },
     ],
     status: { code: trajectory.solved || trajectory.judge?.accepted ? 1 : 2 },
   };
@@ -275,8 +358,8 @@ export function buildTracePackFiles({
       {
         resource: {
           attributes: [
-            { key: "service.name", value: { string_value: "openrind-desktop" } },
-            { key: "service.version", value: { string_value: "0.14.0" } },
+            { key: "service.name", value: { stringValue: "openrind-desktop" } },
+            { key: "service.version", value: { stringValue: "0.14.0" } },
           ],
         },
         scopeSpans: [
@@ -289,9 +372,41 @@ export function buildTracePackFiles({
     ],
   };
 
-  const isSealed = Boolean(trajectory.solved || trajectory.judge || trajectory.challengeEventExport?.complete);
+  // Determine true capture completeness (independent of judge verdict / task success)
+  const hasCrash = Boolean(trajectory.error || trajectory.crashed || (steps && steps.some(s => s.error && s.fatal)));
+  const isComplete = !hasCrash && (
+    trajectory.status === "completed" ||
+    Boolean(trajectory.completedAt) ||
+    trajectory.exitReason === "complete" ||
+    (Array.isArray(agentEvents) && agentEvents.some(e => e.kind === "agent_complete")) ||
+    (steps.length > 0 && !trajectory.aborted && !trajectory.timedOut)
+  );
+
+  // Determine active producers that actually contributed evidence
+  const activeProducers = new Set(["agent"]);
+  if (Array.isArray(haloopSpans) && haloopSpans.length > 0) activeProducers.add("inference-gateway");
+  if (Array.isArray(challengeEvents) && challengeEvents.length > 0) {
+    activeProducers.add("challenge-server");
+    if (challengeEvents.some(e => e.kind === "judge" || e.producer === "challenge-judge")) {
+      activeProducers.add("challenge-judge");
+    }
+  } else if (trajectory.judge?.independent) {
+    activeProducers.add("challenge-judge");
+  }
+  if (Array.isArray(agentEvents) && agentEvents.some(e => e.kind?.startsWith("browser_pod") || e.observer === "browser")) {
+    activeProducers.add("browser");
+  }
 
   // 5. Build Manifest
+  const profiles = [
+    "agent-execution/v1",
+    "browser-ctf/v1",
+    "task-verification/v1",
+  ];
+  if (hasObservedModelContext) {
+    profiles.unshift("model-context/v1");
+  }
+
   const manifest = {
     schema_version: TRACEPACK_SCHEMA_VERSION,
     parser_version: PARSER_VERSION,
@@ -308,28 +423,17 @@ export function buildTracePackFiles({
       title: task.title || taskId,
       category: task.category || "web",
     },
-    profiles: [
-      "model-context/v1",
-      "agent-execution/v1",
-      "browser-ctf/v1",
-      "task-verification/v1",
-    ],
+    profiles,
     model: trajectory.model || "unknown",
     capture: {
-      complete: isSealed,
-      sealed: isSealed,
+      complete: isComplete,
+      sealed: isComplete,
       dropped_events_count: 0,
       total_conversation_turns: conversationLines.length,
       total_events: eventLines.length,
       total_artifacts: Object.keys(artifactsMap).length,
     },
-    producers: [
-      "inference-gateway",
-      "agent",
-      "browser",
-      "challenge-server",
-      "challenge-judge",
-    ],
+    producers: Array.from(activeProducers),
   };
 
   // 6. Compile File List
@@ -385,7 +489,8 @@ export function buildTracePackFiles({
       {
         run_id: traceId,
         trace_id: traceId,
-        status: isSealed ? "sealed_complete" : "incomplete",
+        receipt_type: "local_export",
+        status: isComplete ? "local_export_complete" : "local_export_incomplete",
         sealed_at: new Date().toISOString(),
         event_count: eventLines.length,
         artifact_count: Object.keys(artifactsMap).length,
@@ -394,6 +499,26 @@ export function buildTracePackFiles({
       2
     ),
   });
+
+  // 7. Store Raw Source Records
+  files.push({
+    path: "tracepack/source-records/trajectory.json",
+    content: JSON.stringify(trajectory, null, 2),
+  });
+
+  if (Array.isArray(agentEvents) && agentEvents.length > 0) {
+    files.push({
+      path: "tracepack/source-records/agent-events.jsonl",
+      content: agentEvents.map((e) => JSON.stringify(e)).join("\n") + "\n",
+    });
+  }
+
+  if (Array.isArray(challengeEvents) && challengeEvents.length > 0) {
+    files.push({
+      path: "tracepack/source-records/challenge-events.jsonl",
+      content: challengeEvents.map((e) => JSON.stringify(e)).join("\n") + "\n",
+    });
+  }
 
   return { files, manifest };
 }

@@ -737,7 +737,11 @@ async function callLlmInference({
     }
     const text = data?.content?.filter((c) => c.type === "text").map((c) => c.text).join("\n") || "";
     if (!text) throw new Error("Empty response from Anthropic API");
-    return text;
+    return {
+      text,
+      rawRequest: { model, messages: anthropicMessages, system: systemPrompt },
+      rawResponse: data,
+    };
   } else {
     const rawBaseUrl = process.env.OPENROUTER_BASE_URL ||
                        process.env.OPENAI_BASE_URL ||
@@ -820,7 +824,12 @@ async function callLlmInference({
                        choice?.message?.reasoning_content ??
                        choice?.text;
     if (!rawContent) throw new Error(data?.error?.message || "No model response content");
-    return typeof rawContent === "string" ? rawContent : JSON.stringify(rawContent);
+    const extractedText = typeof rawContent === "string" ? rawContent : JSON.stringify(rawContent);
+    return {
+      text: extractedText,
+      rawRequest: { model, messages: history, temperature: 0, max_tokens: tokenLimit },
+      rawResponse: data,
+    };
   }
 }
 
@@ -1375,6 +1384,8 @@ export function createCtfService() {
       }
 
       const runStart = Date.now();
+      const modelCallsJournal = [];
+      const runId = `ctf-${task.id}-${runStart}`;
       const steps = [];
       const challengeEvents = [];
       let solved = false;
@@ -1400,6 +1411,9 @@ export function createCtfService() {
         const finishedAt = new Date().toISOString();
         const trajectory = {
           format: "openrind-ctf-trajectory/v1",
+          runId,
+          sessionId: `${task.id}:${runId.slice(-12)}`,
+          status: wasStopped ? "stopped" : "completed",
           task: {
             id: task.id,
             title: task.title,
@@ -1408,28 +1422,49 @@ export function createCtfService() {
           },
           model,
           startedAt: new Date(runStart).toISOString(),
+          completedAt: finishedAt,
           solved: wasSolved,
           stopped: wasStopped,
           judge: {
             accepted: wasSolved,
             submittedAt: finishedAt,
             submission: flag,
+            verifiedBy: "challenge-server.mjs",
           },
           steps,
         };
 
         try {
           const trajectoryJson = JSON.stringify(trajectory, null, 2);
-          const agentEventsLines = steps.map((s) => JSON.stringify({
-            kind: "agent_step",
-            number: s.number,
-            at: s.at || new Date().toISOString(),
-            thought: s.thought,
-            tool: s.tool,
-            action: s.action,
-            observation: s.observation,
-            durationMs: s.durationMs,
-          })).join("\n") + "\n";
+          const combinedEvents = [
+            ...modelCallsJournal.map(mc => ({
+              kind: "model_call",
+              at: mc.at,
+              turn: mc.turn,
+              attempt: mc.attempt,
+              model: mc.model,
+              request: mc.request,
+              response: mc.response,
+              origin: "agent",
+              observer: "agent",
+              relayed_by: "inference-gateway",
+            })),
+            ...steps.map((s) => ({
+              kind: "agent_step",
+              number: s.number,
+              at: s.at || new Date().toISOString(),
+              thought: s.thought,
+              tool: s.tool,
+              action: s.action,
+              observation: s.observation,
+              rawObservation: s.rawObservation || s.observation,
+              durationMs: s.durationMs,
+              executor: s.executor || (s.action?.action === "eval" ? "mock_dom_eval" : "host_http_adapter"),
+              origin: "agent",
+              observer: "agent",
+            }))
+          ];
+          const agentEventsLines = combinedEvents.map((e) => JSON.stringify(e)).join("\n") + "\n";
 
           const challengeEventsLines = (challengeEvents.length > 0 ? challengeEvents : [
             {
@@ -1594,13 +1629,25 @@ Return only valid JSON matching the schema. Keep thoughts concise (1-2 sentences
                 ? AbortSignal.any([activeRunAbort.signal, AbortSignal.timeout(90_000)])
                 : AbortSignal.timeout(90_000);
 
-              const rawContent = await callLlmInference({
+              const inferRes = await callLlmInference({
                 apiKey,
                 isAnthropic: keyInfo.isAnthropic,
                 model: effectiveModel,
                 history,
                 signal: requestSignal,
               });
+
+              const rawContent = typeof inferRes === "object" && inferRes.text !== undefined ? inferRes.text : inferRes;
+              if (typeof inferRes === "object") {
+                modelCallsJournal.push({
+                  turn,
+                  attempt,
+                  at: new Date().toISOString(),
+                  model: effectiveModel,
+                  request: inferRes.rawRequest || { messages: [...history] },
+                  response: inferRes.rawResponse || null,
+                });
+              }
 
               modelAction = extractActionJson(rawContent);
               if (modelAction && typeof modelAction === "object") {
@@ -1987,7 +2034,16 @@ Return only valid JSON matching the schema. Keep thoughts concise (1-2 sentences
           challengeEvents = raw.split("\n").filter(Boolean).map(l => JSON.parse(l));
         } catch {}
       }
-      return { trajectory, agentEvents, challengeEvents };
+      return {
+        trajectory,
+        agentEvents,
+        challengeEvents,
+        sourceFilesStatus: {
+          trajectory: Boolean(trajectory),
+          agentEvents: existsSync(agentEventsPath),
+          challengeEvents: existsSync(challengeEventsPath),
+        },
+      };
     },
 
     async exportTracePack(taskId, outPath) {

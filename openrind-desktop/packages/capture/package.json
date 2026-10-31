@@ -1,0 +1,13 @@
+{
+  "name": "@openrind/capture",
+  "version": "0.14.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.mjs",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

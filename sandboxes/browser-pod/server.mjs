@@ -13,16 +13,31 @@ const child = spawn('/usr/lib/chromium/chromium', [
 ], { stdio: 'inherit' });
 
 const server = http.createServer((req, res) => {
+  const urlObj = new URL(req.url, 'http://127.0.0.1:9221');
+  const path = urlObj.pathname + urlObj.search;
   const proxyReq = http.request({
     host: '127.0.0.1',
     port: 9221,
-    path: req.url,
+    path,
     method: req.method,
     headers: {
       ...req.headers,
       host: '127.0.0.1:9221',
     },
   }, (proxyRes) => {
+    const isJson = (proxyRes.headers['content-type'] || '').includes('json');
+    if (isJson && (urlObj.pathname === '/json/version' || urlObj.pathname === '/json' || urlObj.pathname === '/json/list')) {
+      let chunks = [];
+      proxyRes.on('data', c => chunks.push(c));
+      proxyRes.on('end', () => {
+        const hostHeader = req.headers.host || 'openrind-browser-pod:9222';
+        const bodyStr = Buffer.concat(chunks).toString('utf8').replaceAll('127.0.0.1:9221', hostHeader);
+        const headers = { ...proxyRes.headers, 'content-length': Buffer.byteLength(bodyStr) };
+        res.writeHead(proxyRes.statusCode, headers);
+        res.end(bodyStr);
+      });
+      return;
+    }
     res.writeHead(proxyRes.statusCode, proxyRes.headers);
     proxyRes.pipe(res);
   });
@@ -36,9 +51,11 @@ const server = http.createServer((req, res) => {
 });
 
 server.on('upgrade', (req, socket, head) => {
+  const urlObj = new URL(req.url, 'http://127.0.0.1:9221');
+  const path = urlObj.pathname + urlObj.search;
   const targetSocket = net.connect(9221, '127.0.0.1', () => {
     const rawReq = [
-      `${req.method} ${req.url} HTTP/1.1`,
+      `${req.method} ${path} HTTP/1.1`,
       'Host: 127.0.0.1:9221',
       'Upgrade: websocket',
       'Connection: Upgrade',

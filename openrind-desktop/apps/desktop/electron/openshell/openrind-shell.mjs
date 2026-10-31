@@ -29,6 +29,7 @@ export {
   rotateOpenrindShellHaloop,
   requiredHaloopUpstreamApiKey,
   ensureBrowserPod,
+  ensureRuntimeScripts,
   uploadWorkspaceFile,
 } from "./fuse-sandbox.mjs";
 export {
@@ -69,9 +70,9 @@ const HALOOP_SESSION_ASSERTION_PATTERN =
   /^v1\.[0-9a-f]{32}\.[1-9][0-9]{9,15}\.[1-9][0-9]{9,15}\.[0-9a-f]{64}$/;
 
 export function imageForProfile(profile) {
-  if (!["openrind-shell-claude", "openrind-shell-openclaw", "openrind-shell-openhands", "openrind-shell-openhands-script"].includes(profile)) {
+  if (!["openrind-shell-claude", "openrind-shell-openclaw", "openrind-shell-codex", "openrind-shell-openhands", "openrind-shell-openhands-script"].includes(profile)) {
     throw new Error(
-      `The primary FUSE runtime supports Claude, OpenClaw, and OpenHands profiles only; received ${JSON.stringify(profile)}.`,
+      `The primary FUSE runtime supports Claude, OpenClaw, Codex, and OpenHands profiles only; received ${JSON.stringify(profile)}.`,
     );
   }
   return process.env.OPENRIND_DESKTOP_SANDBOX_IMAGE?.trim() || FUSE_IMAGE;
@@ -102,11 +103,13 @@ function deriveClaudeSessionUuid(sessionId) {
  * transcript for a selected desktop session.
  */
 export function resolveAgentSessionValue(profile, agentSessionId, haloopSessionAssertion) {
-  if (!["openrind-shell-claude", "openrind-shell-openclaw", "openrind-shell-openhands", "openrind-shell-openhands-script"].includes(profile)) {
-    throw new Error("The primary FUSE runtime supports Claude, OpenClaw, and OpenHands profiles only.");
+  if (!["openrind-shell-claude", "openrind-shell-openclaw", "openrind-shell-codex", "openrind-shell-openhands", "openrind-shell-openhands-script"].includes(profile)) {
+    throw new Error("The primary FUSE runtime supports Claude, OpenClaw, Codex, and OpenHands profiles only.");
   }
   const sessionId = String(agentSessionId ?? "").trim();
-  const value = sessionId ? deriveClaudeSessionUuid(sessionId) : "auto";
+  const value = sessionId
+    ? (profile === "openrind-shell-claude" ? deriveClaudeSessionUuid(sessionId) : sessionId.replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 64))
+    : "auto";
   const assertion = String(haloopSessionAssertion ?? "").trim();
   if (!HALOOP_SESSION_ASSERTION_PATTERN.test(assertion)) {
     throw new Error("A signed Haloop conversation context is required for agent launch.");
@@ -157,12 +160,12 @@ export async function writeCurrentSessionMarker(name, value, browserGrant, brows
   if (
     marker &&
     !new RegExp(
-      `^(?:openrind-shell-claude|openrind-shell-openclaw|openrind-shell-openhands|openrind-shell-openhands-script):(?:auto|[0-9a-f]{8}-[0-9a-f-]{27}):${HALOOP_SESSION_ASSERTION_PATTERN.source.slice(1, -1)}$`,
+      `^(?:openrind-shell-claude|openrind-shell-openclaw|openrind-shell-codex|openrind-shell-openhands|openrind-shell-openhands-script):(?:auto|[0-9a-f]{8}-[0-9a-f-]{27}):${HALOOP_SESSION_ASSERTION_PATTERN.source.slice(1, -1)}$`,
     ).test(marker)
   ) {
     throw new Error("Invalid desktop Claude session marker.");
   }
-  if (browserGrant !== undefined && (!/^(?:openrind-shell-claude|openrind-shell-openclaw|openrind-shell-openhands|openrind-shell-openhands-script):/.test(marker) ||
+  if (browserGrant !== undefined && (!/^(?:openrind-shell-claude|openrind-shell-openclaw|openrind-shell-codex|openrind-shell-openhands|openrind-shell-openhands-script):/.test(marker) ||
       typeof browserGrant !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(browserGrant))) {
     throw new Error('Invalid browser launch grant.');
   }
@@ -190,9 +193,32 @@ export async function writeCurrentSessionMarker(name, value, browserGrant, brows
   const writeBrowserEnv = (browserGrant && browserServiceToken)
     ? `printf 'export OPENRIND_BROWSER_GRANT=%s\\nexport OPENRIND_BROWSER_SERVICE_TOKEN=%s\\n' ${shellQuote(browserGrant)} ${shellQuote(browserServiceToken)} > /var/lib/openrind-shell/runtime/browser.env; chmod 600 /var/lib/openrind-shell/runtime/browser.env;`
     : "";
-  const writeApiKey = apiKey
-    ? `printf 'export OPENROUTER_API_KEY=%s\\nexport ANTHROPIC_API_KEY=%s\\n' ${shellQuote(apiKey)} ${shellQuote(apiKey)} > /var/lib/openrind-shell/runtime/api-key.env; chmod 600 /var/lib/openrind-shell/runtime/api-key.env;`
-    : "";
+  let writeApiKey = "";
+  if (apiKey && typeof apiKey === "object") {
+    const lines = [];
+    const fallbackKey = apiKey.openRouterApiKey || apiKey.anthropicApiKey || apiKey.openaiApiKey || apiKey.codexApiKey;
+    const openRouter = apiKey.openRouterApiKey || fallbackKey;
+    const anthropic = apiKey.anthropicApiKey || fallbackKey;
+    const oai = apiKey.openaiApiKey || apiKey.codexApiKey || fallbackKey;
+    if (openRouter) lines.push(`export OPENROUTER_API_KEY=${shellQuote(openRouter)}`);
+    if (anthropic) lines.push(`export ANTHROPIC_API_KEY=${shellQuote(anthropic)}`);
+    if (oai) {
+      lines.push(`export OPENAI_API_KEY=${shellQuote(oai)}`);
+      lines.push(`export CODEX_API_KEY=${shellQuote(oai)}`);
+    }
+    if (lines.length > 0) {
+      writeApiKey = `printf '${lines.join("\\n")}\\n' > /var/lib/openrind-shell/runtime/api-key.env; chmod 600 /var/lib/openrind-shell/runtime/api-key.env;`;
+    }
+  } else if (typeof apiKey === "string" && apiKey.trim()) {
+    const key = apiKey.trim();
+    const lines = [
+      `export OPENROUTER_API_KEY=${shellQuote(key)}`,
+      `export ANTHROPIC_API_KEY=${shellQuote(key)}`,
+      `export OPENAI_API_KEY=${shellQuote(key)}`,
+      `export CODEX_API_KEY=${shellQuote(key)}`,
+    ];
+    writeApiKey = `printf '${lines.join("\\n")}\\n' > /var/lib/openrind-shell/runtime/api-key.env; chmod 600 /var/lib/openrind-shell/runtime/api-key.env;`;
+  }
   const script = marker
     ? `set -eu; umask 077; ${repairHook}; mkdir -p /var/lib/openrind-shell/runtime; ${writeApiKey} ${writeBrowserGrant} ${writeBrowserToken} ${writeBrowserEnv} printf %s ${shellQuote(name)} > /var/lib/openrind-shell/runtime/sandbox-name; cat > ${SESSION_MARKER_PATH}; chmod 600 ${SESSION_MARKER_PATH}`
     : `rm -f ${SESSION_MARKER_PATH}`;

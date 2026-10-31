@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [nemo, browser-pods]
+    branches: [nemo, browser-pods, feature/codex]
   push:
-    branches: [nemo, browser-pods]
+    branches: [nemo, browser-pods, feature/codex]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}

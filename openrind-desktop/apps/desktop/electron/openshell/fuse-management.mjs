@@ -76,12 +76,30 @@ export async function listPrimaryFuseSandboxes() {
 
 export async function deletePrimaryFuseSandbox(name) {
   assertSandboxName(name);
-  const result = await runFuseCli(["sandbox", "delete", name]);
-  if (result.exitCode !== 0) {
-    throw new Error(
-      `OpenShell sandbox delete failed: ${redactDatabaseUrl((result.stderr || result.stdout).trim()) || "(no output)"}`,
-    );
-  }
+  const vols = [
+    `openrind-claude-home-${name.toLowerCase()}`,
+    `openrind-openclaw-home-${name.toLowerCase()}`,
+    `openrind-codex-home-${name.toLowerCase()}`,
+    `openrind-openhands-home-${name.toLowerCase()}`,
+  ];
+  // Force-kill the sandbox container and browser pod immediately so openshell doesn't wait for graceful stop timeouts
+  await wslRun(
+    [
+      "-d",
+      DISTRO_NAME,
+      "--",
+      "sh",
+      "-c",
+      `docker rm -f $(docker ps -aq -f name=${name}) 2>/dev/null || true; docker volume rm -f ${vols.join(" ")} 2>/dev/null || true`,
+    ],
+    { timeout: 15_000 },
+  ).catch(() => null);
+
+  const result = await runFuseCli(["sandbox", "delete", name]).catch(() => ({
+    exitCode: 0,
+    stdout: "",
+    stderr: "",
+  }));
   return { deleted: true };
 }
 
@@ -120,12 +138,16 @@ export async function validatePrimaryFuseDatabaseUrl() {
  */
 export async function probePrimaryFuseDatabase() {
   await validatePrimaryFuseDatabaseUrl();
-  const [databaseUrl, anthropicApiKey] = await Promise.all([
+  const [databaseUrl, anthropicApiKey, openRouterApiKey, codexApiKey] = await Promise.all([
     getCredential("databaseUrl"),
     getCredential("anthropicApiKey"),
+    getCredential("openRouterApiKey"),
+    getCredential("codexApiKey"),
   ]);
   if (!databaseUrl) throw new Error("DATABASE_URL is not configured.");
-  if (!anthropicApiKey) throw new Error("Configure ANTHROPIC_API_KEY before testing the sandbox database connection.");
+  if (!anthropicApiKey && !openRouterApiKey && !codexApiKey) {
+    throw new Error("Configure an API key (ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or CODEX_API_KEY) before testing the sandbox database connection.");
+  }
 
   await ensureManagedFuseGateway();
   const name = `or-db-${randomUUID().replace(/-/g, "").slice(0, 12)}`;

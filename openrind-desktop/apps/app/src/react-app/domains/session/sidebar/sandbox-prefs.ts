@@ -19,6 +19,7 @@ export function readSandboxProfile(sandboxName: string): SandboxProfile {
   try {
     const value = localStorage.getItem(PROFILE_KEY_PREFIX + sandboxName);
     if (value === "openrind-shell-openclaw") return "openrind-shell-openclaw";
+    if (value === "openrind-shell-codex") return "openrind-shell-codex";
     if (value === "openrind-shell-openhands" || value === "openrind-shell-openhands-script") return value;
     if (value === "openrind-shell-claude") return "openrind-shell-claude";
 
@@ -36,6 +37,7 @@ export function readSandboxProfile(sandboxName: string): SandboxProfile {
               const val = localStorage.getItem(key);
               if (val === "openrind-shell-openhands" || val === "openrind-shell-openhands-script") return val;
               if (val === "openrind-shell-openclaw") return "openrind-shell-openclaw";
+              if (val === "openrind-shell-codex") return "openrind-shell-codex";
             }
           }
         }

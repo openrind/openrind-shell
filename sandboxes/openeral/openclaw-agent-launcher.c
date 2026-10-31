@@ -87,6 +87,11 @@ int main(int argc, char **argv) {
         openclaw_argv[4] = session_option;
     }
 
+    if (setenv("HOME", "/sandbox/openclaw-home", 1) == -1) {
+        perror("openrind-openclaw-agent: set HOME");
+        return 1;
+    }
+
     if (unsetenv("NODE_OPTIONS") == -1 || unsetenv("NODE_PATH") == -1) {
         perror("openrind-openclaw-agent: sanitize Node environment");
         return 1;

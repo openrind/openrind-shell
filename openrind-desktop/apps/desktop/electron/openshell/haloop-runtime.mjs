@@ -409,8 +409,8 @@ export function buildTrustedHaloopAppSpan(capture, event) {
 
 export function buildHaloopAgentLifecycleEvent(agent, event) {
   const agentId = String(agent ?? "").trim();
-  if (agentId !== "claude" && agentId !== "openclaw" && agentId !== "openhands") {
-    throw new Error("OPENRIND_SHELL_AGENT must be claude, openclaw, or openhands for Haloop lifecycle capture.");
+  if (agentId !== "claude" && agentId !== "openclaw" && agentId !== "codex" && agentId !== "openhands") {
+    throw new Error("OPENRIND_SHELL_AGENT must be claude, openclaw, codex, or openhands for Haloop lifecycle capture.");
   }
   const cause = String(event?.terminationCause || "process-exit");
   const lifecycle =
@@ -1206,14 +1206,14 @@ export function createHaloopRuntimeManager({
   async function persistReadyRoute(route) {
     const result = await run(["-d", DISTRO_NAME, "--", "sh", "-c",
       `mkdir -p $(dirname ${HALOOP_READY_ROUTE_FILE}) && umask 077; cat > ${HALOOP_READY_ROUTE_FILE}.tmp && mv ${HALOOP_READY_ROUTE_FILE}.tmp ${HALOOP_READY_ROUTE_FILE}`],
-      { stdin: JSON.stringify(route), timeout: 10_000, user: "root" });
+      { stdin: JSON.stringify(route), timeout: 30_000, user: "root" });
     if (result.exitCode !== 0) throw new Error("Could not persist the ready Haloop route.");
   }
 
   async function recoverReadyRoute(gateway) {
     if (lastReadyRoute || !gateway?.managed) return;
     const result = await run(["-d", DISTRO_NAME, "--", "cat", HALOOP_READY_ROUTE_FILE],
-      { timeout: 10_000, user: "root" }).catch(() => null);
+      { timeout: 30_000, user: "root" }).catch(() => null);
     try {
       const route = JSON.parse(result?.stdout || "null");
       if (!route || route.gatewayProfileHash !== gateway.profileHash) return;
@@ -2398,6 +2398,11 @@ export function createHaloopRuntimeManager({
         env,
         optional: true,
       });
+      if (isRemoteGateway()) {
+        const affectedSessions = Number(await options.beforeRevoke?.({ sandboxName })) || 0;
+        const revocation = await revokeProfiles({ sandboxName });
+        return { ...revocation, affectedSessions };
+      }
       await ensureDistro();
 
       const network = await inspectNetwork(run);

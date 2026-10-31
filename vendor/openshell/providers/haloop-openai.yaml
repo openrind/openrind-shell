@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+id: haloop-openai
+display_name: Haloop OpenAI
+description: Required Openrind Shell inference for OpenAI Responses and Codex wire protocols through the Haloop edge
+category: agent
+inference_capable: true
+credentials:
+  - name: bearer_token
+    description: Scoped Haloop Bearer token for OpenAI completions and responses
+    env_vars: [OPENAI_API_KEY, CODEX_API_KEY]
+    required: true
+    auth_style: bearer
+    header_name: Authorization
+  - name: client_token
+    description: Scoped Haloop client token
+    env_vars: [HALOOP_CLIENT_TOKEN, ANTHROPIC_API_KEY]
+    required: false
+    auth_style: header
+    header_name: x-api-key
+discovery:
+  credentials: [bearer_token]
+endpoints:
+  - host: host.openshell.internal
+    port: 8787
+    protocol: rest
+    enforcement: enforce
+    rules:
+      - allow: { method: POST, path: "/v1/responses" }
+      - allow: { method: POST, path: "/v1/chat/completions" }
+      - allow: { method: POST, path: "/chat/completions" }
+      - allow: { method: GET, path: "/v1/models" }
+  - host: 136.112.93.84
+    port: 8787
+    protocol: rest
+    enforcement: enforce
+    rules:
+      - allow: { method: POST, path: "/v1/responses" }
+      - allow: { method: POST, path: "/v1/chat/completions" }
+      - allow: { method: POST, path: "/chat/completions" }
+      - allow: { method: GET, path: "/v1/models" }
+binaries:
+  - { path: /usr/local/bin/codex }
+  - { path: /usr/bin/codex }
+  - { path: /usr/bin/node }

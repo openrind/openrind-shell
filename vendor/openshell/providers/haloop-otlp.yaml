@@ -1,0 +1,40 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+id: haloop-otlp
+display_name: Haloop OTLP
+description: Scoped OTLP and artifact collector route for in-sandbox producers
+category: telemetry
+inference_capable: false
+credentials:
+  - name: collector_token
+    description: Collector authorization token
+    env_vars: [HALOOP_COLLECTOR_TOKEN, OTEL_EXPORTER_OTLP_HEADERS]
+    required: false
+    auth_style: header
+    header_name: x-w8-haloop-collector-token
+endpoints:
+  - host: host.openshell.internal
+    port: 8788
+    protocol: rest
+    enforcement: enforce
+    rules:
+      - allow: { method: POST, path: "/v1/traces" }
+      - allow: { method: POST, path: "/v1/logs" }
+      - allow: { method: POST, path: "/v1/metrics" }
+      - allow: { method: GET, path: "/healthz" }
+  - host: 136.112.93.84
+    port: 8788
+    protocol: rest
+    enforcement: enforce
+    rules:
+      - allow: { method: POST, path: "/v1/traces" }
+      - allow: { method: POST, path: "/v1/logs" }
+      - allow: { method: POST, path: "/v1/metrics" }
+      - allow: { method: GET, path: "/healthz" }
+binaries:
+  - { path: /usr/bin/node }
+  - { path: /usr/local/bin/claude }
+  - { path: /usr/local/bin/codex }
+  - { path: /usr/local/bin/openrind-openclaw-agent }
+  - { path: /usr/local/bin/openrind-openhands-agent }

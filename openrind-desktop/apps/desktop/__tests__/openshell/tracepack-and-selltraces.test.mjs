@@ -89,11 +89,14 @@ test("TracePack builder creates canonical lossless archive structure", () => {
   assert.equal(judgeEvent.provenance.origin, "challenge-server.mjs");
   assert.equal(judgeEvent.provenance.independent_verdict, true);
 
-  // Verify OTLP trace export
+  // Verify OTLP trace export (standard lowerCamelCase OTLP JSON schema)
   const otlpFile = files.find((f) => f.path === "tracepack/otlp/traces.json");
   const otlp = JSON.parse(otlpFile.content);
   assert.ok(Array.isArray(otlp.resourceSpans));
-  assert.equal(otlp.resourceSpans[0].resource.attributes[0].value.string_value, "openrind-desktop");
+  assert.equal(otlp.resourceSpans[0].resource.attributes[0].value.stringValue, "openrind-desktop");
+  assert.equal(otlp.resourceSpans[0].scopeSpans[0].spans[0].kind, 2);
+  assert.equal(typeof otlp.resourceSpans[0].scopeSpans[0].spans[0].traceId, "string");
+  assert.equal(typeof otlp.resourceSpans[0].scopeSpans[0].spans[0].startTimeUnixNano, "string");
 });
 
 test("createTracePackZip creates a valid ZIP buffer with PK signature", () => {
@@ -118,7 +121,7 @@ test("SellTraces projector maintains invariant: no synthesized tool_calls", () =
   });
 
   assert.equal(sellTracesJson.source, "local_trace_index");
-  assert.equal(sellTracesJson.sourceId, "flag-command");
+  assert.ok(sellTracesJson.sourceId.startsWith("flag-command:"));
   assert.equal(sellTracesJson.model, "openai/gpt-4o");
   assert.ok(sellTracesJson.originalHash);
   assert.ok(sellTracesJson.environment);
@@ -149,17 +152,74 @@ test("SellTraces projector maintains invariant: no synthesized tool_calls", () =
   assert.ok(projectionReport.flattened_structures.some((s) => s.includes("verbatim inside assistant text")));
 });
 
-test("PII scanning and scrubbing detects and masks credentials", () => {
-  const sensitiveText = "My key is sk-ant-api03-abcdef1234567890abcdef123456 and token is Bearer eyJhbGciOiJIUzI1NiJ9.secret";
+test("PII scanning and scrubbing detects and masks credentials, passwords and emails", () => {
+  const sensitiveText = 'My key is sk-ant-api03-abcdef1234567890abcdef123456, email is dev@openrind.com, and "password": "super_secret_password_123"';
   const findings = scanPii(sensitiveText);
   assert.ok(findings.some((f) => f.name === "Anthropic API Key"));
-  assert.ok(findings.some((f) => f.name === "Bearer Token"));
+  assert.ok(findings.some((f) => f.name === "Email Address"));
+  assert.ok(findings.some((f) => f.name === "Generic Secret/Password"));
 
   const scrubbed = scrubPiiText(sensitiveText);
   assert.ok(!scrubbed.includes("sk-ant-"));
-  assert.ok(!scrubbed.includes("eyJhbGci"));
+  assert.ok(!scrubbed.includes("dev@openrind.com"));
+  assert.ok(!scrubbed.includes("super_secret_password_123"));
   assert.ok(scrubbed.includes("[REDACTED_ANTHROPIC_KEY]"));
-  assert.ok(scrubbed.includes("[REDACTED_TOKEN]"));
+  assert.ok(scrubbed.includes("[REDACTED_EMAIL]"));
+  assert.ok(scrubbed.includes("[REDACTED_SECRET]"));
+});
+
+test("Observed model requests in agentEvents preserve real prompt canaries and align session ID", () => {
+  const canarySystem = "CANARY_SYSTEM_PROMPT_REAL_TEST";
+  const canaryUser = "CANARY_USER_PROMPT_REAL_TEST";
+  const agentEvents = [
+    {
+      kind: "model_call",
+      at: "2026-10-22T10:00:00.000Z",
+      request: {
+        messages: [
+          { role: "system", content: canarySystem },
+          { role: "user", content: canaryUser },
+        ],
+      },
+      response: {
+        choices: [{ message: { content: '{"thought":"ok","tool":"browser"}' } }],
+      },
+    },
+  ];
+
+  const trajectoryWithRun = {
+    ...SAMPLE_TRAJECTORY,
+    runId: "1234567890abcdef1234567890abcdef",
+  };
+
+  const { files, manifest } = buildTracePackFiles({
+    trajectory: trajectoryWithRun,
+    agentEvents,
+  });
+
+  const { sellTracesJson } = projectToSellTraces({
+    trajectory: trajectoryWithRun,
+    agentEvents,
+  });
+
+  // 1. Session ID parity check between TracePack and SellTraces
+  assert.equal(manifest.session_id, sellTracesJson.sessionId);
+  assert.equal(manifest.session_id, "flag-command:1234567890ab");
+
+  // 2. Canary preservation in conversation.jsonl
+  const convFile = files.find((f) => f.path === "tracepack/conversation.jsonl");
+  const turns = convFile.content.trim().split("\n").map(JSON.parse);
+  assert.equal(turns[0].content, canarySystem);
+  assert.equal(turns[1].content, canaryUser);
+  assert.ok(manifest.profiles.includes("model-context/v1"));
+
+  // 3. Canary preservation in SellTraces messages
+  assert.equal(sellTracesJson.messages[0].content, canarySystem);
+  assert.equal(sellTracesJson.messages[1].content, canaryUser);
+
+  // 4. Source records preserved
+  assert.ok(files.some((f) => f.path === "tracepack/source-records/trajectory.json"));
+  assert.ok(files.some((f) => f.path === "tracepack/source-records/agent-events.jsonl"));
 });
 
 test("Real trace fixture (flag-command-trajectory.json) processes cleanly", async () => {
@@ -175,7 +235,7 @@ test("Real trace fixture (flag-command-trajectory.json) processes cleanly", asyn
   assert.equal(manifest.task.id, "flag-command");
 
   const { sellTracesJson, projectionReport } = projectToSellTraces({ trajectory: raw });
-  assert.equal(sellTracesJson.sourceId, "flag-command");
+  assert.ok(sellTracesJson.sourceId.startsWith("flag-command:"));
   assert.ok(sellTracesJson.messages.length > 5);
   assert.equal(projectionReport.capture_complete, true);
 });

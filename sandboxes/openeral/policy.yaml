@@ -118,6 +118,8 @@ network_policies:
       - { path: /usr/local/bin/claude-real }
       - { path: /usr/local/bin/openrind-openclaw-agent }
       - { path: /usr/local/bin/openrind-openhands-agent }
+      - { path: /usr/local/bin/codex }
+      - { path: /usr/bin/codex }
 
   # --- Claude telemetry and static resources (no inference credential) ---
   claude_support:
@@ -132,6 +134,8 @@ network_policies:
       - { path: /usr/local/bin/claude-real }
       - { path: /usr/local/bin/openrind-openclaw-agent }
       - { path: /usr/local/bin/openrind-openhands-agent }
+      - { path: /usr/local/bin/codex }
+      - { path: /usr/bin/codex }
 
   # --- Haloop In-Sandbox Proxy (Node agent proxy forwarding to remote gateway) ---
   haloop_agent_proxy:
@@ -157,8 +161,15 @@ network_policies:
           - allow: { method: POST, path: "/v1/messages/count_tokens" }
           - allow: { method: POST, path: "/v1/chat/completions" }
           - allow: { method: POST, path: "/chat/completions" }
+      - host: openrouter.ai
+        port: 443
+      - host: api.openai.com
+        port: 443
     binaries:
       - { path: /usr/bin/node }
+      - { path: /usr/local/bin/codex }
+      - { path: /usr/bin/codex }
+      - { path: /usr/bin/curl }
 
   # --- Socket.dev package registry ---
   # When --provider socket is configured with SOCKET_TOKEN, npm traffic

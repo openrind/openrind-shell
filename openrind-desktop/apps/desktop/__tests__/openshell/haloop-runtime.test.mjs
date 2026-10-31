@@ -980,7 +980,7 @@ test("agent lifecycle distinguishes completion, crash, cancellation, deletion, a
   assert.equal(shutdown.attributes["openrind.lifecycle"], "app-shutdown");
   assert.throws(
     () => buildHaloopAgentLifecycleEvent("openrind-shell-claude", { ...base, exitCode: 0 }),
-    /OPENRIND_SHELL_AGENT must be claude, openclaw, or openhands/,
+    /OPENRIND_SHELL_AGENT must be claude, openclaw, codex, or openhands/,
   );
 });
 

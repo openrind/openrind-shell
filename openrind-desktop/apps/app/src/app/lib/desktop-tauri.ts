@@ -13,7 +13,7 @@ export type SandboxBackend = "none" | "docker" | "microsandbox" | "openshell";
  * Openrind Shell image (ghcr.io/openrind/openrind-shell/sandbox:just-bash) with the
  * named agent.
  */
-export type SandboxProfile = "openrind-desktop" | "openrind-shell-claude" | "openrind-shell-openclaw" | "openrind-shell-openhands" | "openrind-shell-openhands-script";
+export type SandboxProfile = "openrind-desktop" | "openrind-shell-claude" | "openrind-shell-openclaw" | "openrind-shell-codex" | "openrind-shell-openhands" | "openrind-shell-openhands-script";
 
 export const desktopFetch = tauriFetch as unknown as typeof globalThis.fetch;
 

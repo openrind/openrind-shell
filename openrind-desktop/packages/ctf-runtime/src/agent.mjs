@@ -346,8 +346,17 @@ Strategy:
 - Return only valid JSON conforming to the schema.
 
 Task: ${task.title}\n${task.description}` }, { role: 'user', content: 'Solve the task.' }];
-  const trajectory = { format: 'openrind-ctf-trajectory/v1', task, model: config.model,
-    startedAt: new Date().toISOString(), steps: [], judge: null, challengeEventExport: { complete: false } };
+  const trajectory = {
+    format: 'openrind-ctf-trajectory/v1',
+    runId: config.runId,
+    sessionId: `${task.id}:${config.runId.slice(-12)}`,
+    task,
+    model: config.model,
+    startedAt: new Date().toISOString(),
+    steps: [],
+    judge: null,
+    challengeEventExport: { complete: false }
+  };
   const save = () => writeAtomic(trajectoryPath, JSON.stringify(trajectory, null, 2));
   let runError;
   let captureError;

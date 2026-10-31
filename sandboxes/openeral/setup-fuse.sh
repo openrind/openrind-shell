@@ -12,6 +12,7 @@ export OPENRIND_SHELL_INIT_MARKER="$OPENRIND_SHELL_RUNTIME_DIR/init.done"
 export OPENRIND_SHELL_HOME=/sandbox/work
 export OPENRIND_SHELL_CLAUDE_HOME=/sandbox/claude-home
 export OPENRIND_SHELL_OPENCLAW_HOME=/sandbox/openclaw-home
+export OPENRIND_SHELL_CODEX_HOME=/sandbox/codex-home
 export OPENRIND_SHELL_OPENHANDS_HOME=/sandbox/openhands-home
 export OPENRIND_SHELL_OPENHANDS_MODE="${OPENRIND_SHELL_OPENHANDS_MODE:-cli}"
 export OPENRIND_SHELL_AGENT="${OPENRIND_SHELL_AGENT:-claude}"
@@ -54,6 +55,13 @@ case "$OPENRIND_SHELL_AGENT" in
     fi
     chmod 700 "$OPENRIND_SHELL_OPENCLAW_HOME"
     install -d -m 0700 "$OPENRIND_SHELL_OPENCLAW_HOME/.openclaw"
+    ;;
+  codex)
+    if [ ! -d "$OPENRIND_SHELL_CODEX_HOME" ] || [ ! -w "$OPENRIND_SHELL_CODEX_HOME" ]; then
+      mkdir -p "$OPENRIND_SHELL_CODEX_HOME" 2>/dev/null || true
+    fi
+    chmod 700 "$OPENRIND_SHELL_CODEX_HOME" 2>/dev/null || true
+    install -d -m 0700 "$OPENRIND_SHELL_CODEX_HOME/.codex"
     ;;
   openhands)
     case "$OPENRIND_SHELL_OPENHANDS_MODE" in cli|script) ;; *) exit 64 ;; esac
@@ -310,6 +318,20 @@ try {
 EOF
 }
 
+chmod 0644 /opt/openrind/browser/*.json 2>/dev/null || true
+install -d -m 0755 /etc/openrind-browser-pods
+if [ ! -f /etc/openrind-browser-pods/helper.json ]; then
+  printf '{"brokerOrigin":"http://127.0.0.1:19300","generation":"openrind-desktop"}\n' > /etc/openrind-browser-pods/helper.json
+  chmod 0644 /etc/openrind-browser-pods/helper.json 2>/dev/null || true
+fi
+if [ -f /opt/openrind-shell/browser-socket-relay.mjs ] && ! pgrep -f "browser-socket-relay" >/dev/null 2>&1; then
+  /usr/bin/node /opt/openrind-shell/browser-socket-relay.mjs >/dev/null 2>&1 &
+fi
+if [ -f /opt/openrind-browser-pods/bin/openrind-browser-pod-helper.mjs ]; then
+  pkill -f "openrind-browser-pod-helper" >/dev/null 2>&1 || true
+  OPENRIND_BROWSER_PODS_EXPERIMENTAL=1 /opt/openrind-browser-pods/bin/helper-ensure.sh >/dev/null 2>&1 || true
+fi
+
 if [ "$OPENRIND_SHELL_AGENT" = claude ]; then
   # Desktop owns the mandatory API route. Seed Claude's persistent home as
   # host-provisioned so its first-run account/OAuth connectivity probes cannot
@@ -319,19 +341,6 @@ if [ "$OPENRIND_SHELL_AGENT" = claude ]; then
     for target_skills_dir in "$OPENRIND_SHELL_CLAUDE_HOME/.claude/skills" "$OPENRIND_SHELL_HOME/.claude/skills"; do
       sync_bundled_skills /opt/openrind-shell/skills "$target_skills_dir"
     done
-  fi
-  chmod 0644 /opt/openrind/browser/*.json 2>/dev/null || true
-  install -d -m 0755 /etc/openrind-browser-pods
-  if [ ! -f /etc/openrind-browser-pods/helper.json ]; then
-    printf '{"brokerOrigin":"http://127.0.0.1:19300","generation":"openrind-desktop"}\n' > /etc/openrind-browser-pods/helper.json
-    chmod 0644 /etc/openrind-browser-pods/helper.json 2>/dev/null || true
-  fi
-  if [ -f /opt/openrind-shell/browser-socket-relay.mjs ] && ! pgrep -f "browser-socket-relay" >/dev/null 2>&1; then
-    /usr/bin/node /opt/openrind-shell/browser-socket-relay.mjs >/dev/null 2>&1 &
-  fi
-  if [ -f /opt/openrind-browser-pods/bin/openrind-browser-pod-helper.mjs ]; then
-    pkill -f "openrind-browser-pod-helper" >/dev/null 2>&1 || true
-    OPENRIND_BROWSER_PODS_EXPERIMENTAL=1 /opt/openrind-browser-pods/bin/helper-ensure.sh >/dev/null 2>&1 || true
   fi
   HOME="$OPENRIND_SHELL_CLAUDE_HOME" node /opt/openrind-shell/configure-haloop.mjs
   # Warm the immutable executable and its dynamic loader while provisioning is
@@ -348,6 +357,7 @@ elif [ "$OPENRIND_SHELL_AGENT" = openclaw ]; then
   # interactive launch path.
   HOME="$OPENRIND_SHELL_OPENCLAW_HOME" \
     /usr/bin/node /opt/openrind-shell/configure-haloop.mjs
+  OPENRIND_GATEWAY_BASE_URL="http://127.0.0.1:8785" \
   HOME="$OPENRIND_SHELL_OPENCLAW_HOME" \
     /usr/bin/node /opt/openrind-shell/configure-openclaw-fuse.mjs
 
@@ -473,6 +483,7 @@ SESSION_ENV="$OPENRIND_SHELL_RUNTIME_DIR/session.env"
   printf 'export OPENRIND_SHELL_HOME='; shell_quote "$OPENRIND_SHELL_HOME"; printf '\n'
   printf 'export OPENRIND_SHELL_CLAUDE_HOME='; shell_quote "$OPENRIND_SHELL_CLAUDE_HOME"; printf '\n'
   printf 'export OPENRIND_SHELL_OPENCLAW_HOME='; shell_quote "$OPENRIND_SHELL_OPENCLAW_HOME"; printf '\n'
+  printf 'export OPENRIND_SHELL_CODEX_HOME='; shell_quote "$OPENRIND_SHELL_CODEX_HOME"; printf '\n'
   printf 'export OPENRIND_SHELL_OPENHANDS_HOME='; shell_quote "$OPENRIND_SHELL_OPENHANDS_HOME"; printf '\n'
   printf 'export OPENRIND_SHELL_OPENHANDS_MODE='; shell_quote "$OPENRIND_SHELL_OPENHANDS_MODE"; printf '\n'
   printf 'export OPENRIND_SHELL_AGENT='; shell_quote "$OPENRIND_SHELL_AGENT"; printf '\n'

@@ -23,6 +23,9 @@ import { deriveSandboxName } from "../../session/sidebar/use-sandbox-rows";
 type CredentialStatus = {
   databaseUrl: "set" | "unset" | "unknown";
   anthropicApiKey: "set" | "unset" | "unknown";
+  openRouterApiKey?: "set" | "unset" | "unknown";
+  codexApiKey?: "set" | "unset" | "unknown";
+  openaiApiKey?: "set" | "unset" | "unknown";
   openrindShellAgent: string | null;
   openrindGatewayApiBase: string | null;
 };
@@ -56,9 +59,9 @@ export function CreateSandboxModal(props: CreateSandboxModalProps) {
   }, [props.open]);
 
   const dbReady = creds?.databaseUrl === "set";
-  const anthropicReady = creds?.anthropicApiKey === "set";
+  const apiReady = creds?.anthropicApiKey === "set" || creds?.openRouterApiKey === "set" || creds?.codexApiKey === "set" || creds?.openaiApiKey === "set";
   const dbBlocked = !dbReady;
-  const authBlocked = !anthropicReady;
+  const authBlocked = !apiReady;
   
   const isBlocked = dbBlocked || authBlocked;
 
@@ -182,6 +185,7 @@ export function CreateSandboxModal(props: CreateSandboxModalProps) {
               >
                 <option value="openrind-shell-claude">{t("sandbox.agent_claude")}</option>
                 <option value="openrind-shell-openclaw">{t("sandbox.agent_openclaw")}</option>
+                <option value="openrind-shell-codex">{t("sandbox.agent_codex") || "Codex CLI"}</option>
                 <option value="openrind-shell-openhands">OpenHands CLI</option>
               </select>
             </div>

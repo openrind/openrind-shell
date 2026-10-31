@@ -4,6 +4,19 @@ set -uo pipefail
 export HOME=/sandbox/openclaw-home
 export OPENRIND_SHELL_HOME=/sandbox/work
 export OPENRIND_SHELL_OPENCLAW_HOME=/sandbox/openclaw-home
+RUNTIME_DIR="${OPENRIND_SHELL_RUNTIME_DIR:-/var/lib/openrind-shell/runtime}"
+if [ -f "$RUNTIME_DIR/api-key.env" ]; then
+  # shellcheck disable=SC1090
+  . "$RUNTIME_DIR/api-key.env"
+fi
+export OPENAI_API_KEY="${OPENAI_API_KEY:-${ANTHROPIC_API_KEY:-sk-openrind-compat-key}}"
+export CODEX_API_KEY="${CODEX_API_KEY:-$OPENAI_API_KEY}"
+if [ -f "$RUNTIME_DIR/session.env" ]; then
+  # shellcheck disable=SC1090
+  . "$RUNTIME_DIR/session.env"
+fi
+export OPENRIND_SHELL_OPENCLAW_HOME="${OPENRIND_SHELL_OPENCLAW_HOME:-/sandbox/openclaw-home}"
+export HOME="$OPENRIND_SHELL_OPENCLAW_HOME"
 export NODE_NO_WARNINGS="${NODE_NO_WARNINGS:-1}"
 export OPENCLAW_NO_RESPAWN=1
 export OPENCLAW_SKIP_CHANNELS=1
@@ -11,6 +24,7 @@ export OPENCLAW_SKIP_CANVAS_HOST=1
 export OPENCLAW_SKIP_GMAIL_WATCHER=1
 export OPENCLAW_DISABLE_BONJOUR=1
 export OPENCLAW_EXEC_SHELL_SNAPSHOT=0
+export OPENCLAW_CHILD_OOM_SCORE_ADJ=0
 export OPENCLAW_LOG_LEVEL="${OPENCLAW_LOG_LEVEL:-error}"
 export DEBUG="${DEBUG:-}"
 export PI_DEBUG_REDRAW=0
@@ -60,7 +74,7 @@ if [ -f /opt/openrind-shell/haloop-agent-proxy.mjs ]; then
   export HALOOP_GATEWAY_URL="${HALOOP_GATEWAY_URL:-${HALOOP_UPSTREAM_URL:-http://136.112.93.84:8787}}"
   export HALOOP_UPSTREAM_URL="$HALOOP_GATEWAY_URL"
   export NODE_USE_ENV_PROXY=1
-  /usr/bin/node /opt/openrind-shell/haloop-agent-proxy.mjs &
+  nohup /usr/bin/node /opt/openrind-shell/haloop-agent-proxy.mjs </dev/null >"$RUNTIME_DIR/proxy.log" 2>&1 &
   PROXY_PID=$!
   for _i in $(seq 1 30); do
     if curl -s -o /dev/null http://127.0.0.1:8785/healthz 2>/dev/null; then
@@ -69,6 +83,7 @@ if [ -f /opt/openrind-shell/haloop-agent-proxy.mjs ]; then
     sleep 0.05
   done
   export OPENRIND_GATEWAY_BASE_URL="http://127.0.0.1:8785"
+  export ANTHROPIC_BASE_URL="http://127.0.0.1:8785"
 fi
 
 # Keep the real terminal on OpenClaw's stdin. The native fixed-target launcher

@@ -368,6 +368,6 @@ test("Haloop profile registration rejects unsupported agents", async () => {
       workspaceId: "workspace-1",
       agentId: "generic",
     }),
-    /Claude, OpenClaw, and OpenHands only/,
+    /Claude, OpenClaw, Codex, and OpenHands only/,
   );
 });

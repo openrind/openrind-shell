@@ -6,7 +6,7 @@ on:
       - nemo
       - browser-pods
       - run/ctf-agent
-      - fix/openshell-feedbacks
+      - feature/codex
     paths:
       - 'Cargo.lock'
       - 'Cargo.toml'

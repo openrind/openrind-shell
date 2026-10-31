@@ -64,6 +64,29 @@ export type SandboxRowsState = {
 
 /** Only Openrind Shell sandboxes belong in this list. */
 const NAME_PREFIX = "openrind-shell-";
+const SANDBOXES_STORAGE_KEY = "openrind.sandboxes.cache";
+
+function readCachedRaw(): RawSandboxRow[] {
+  try {
+    if (typeof window === "undefined") return [];
+    const stored = localStorage.getItem(SANDBOXES_STORAGE_KEY);
+    if (!stored) return [];
+    const parsed = JSON.parse(stored);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeCachedRaw(rows: RawSandboxRow[]) {
+  try {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(SANDBOXES_STORAGE_KEY, JSON.stringify(rows));
+  } catch {}
+}
+
+let memoryCachedRaw: RawSandboxRow[] = [];
+let memoryLoaded = false;
 
 export function deriveSandboxName(workspaceId: string): string {
   const trimmed = workspaceId
@@ -79,11 +102,20 @@ export function useSandboxRows(options?: {
   workspaces?: any[];
 }): SandboxRowsState {
   const bridge = getBridge();
-  const [raw, setRaw] = useState<RawSandboxRow[]>([]);
+  const [raw, setRaw] = useState<RawSandboxRow[]>(() => {
+    if (memoryCachedRaw.length > 0) return memoryCachedRaw;
+    const fromStorage = readCachedRaw();
+    if (fromStorage.length > 0) {
+      memoryCachedRaw = fromStorage;
+      memoryLoaded = true;
+      return fromStorage;
+    }
+    return [];
+  });
   const [liveSessions, setLiveSessions] = useState<Set<string>>(() => new Set());
-  const [loaded, setLoaded] = useState(false);
+  const [loaded, setLoaded] = useState(() => memoryLoaded || memoryCachedRaw.length > 0);
   const [error, setError] = useState<string | null>(null);
-  const [busyName, setBusyName] = useState<string | null>(null);
+  const [busyNames, setBusyNames] = useState<Set<string>>(() => new Set());
   // Bumped on rename so the memo below recomputes; display names live in
   // localStorage rather than in this state.
   const [labelVersion, setLabelVersion] = useState(0);
@@ -102,13 +134,16 @@ export function useSandboxRows(options?: {
           "openrindListSandboxes",
         )) as RawSandboxRow[];
         if (Array.isArray(list)) {
-          setRaw(
-            list.filter(
-              (row) =>
-                typeof row?.name === "string" &&
-                (row.name.startsWith(NAME_PREFIX) || row.name.startsWith("or-")),
-            ),
+          const filtered = list.filter(
+            (row) =>
+              typeof row?.name === "string" &&
+              (row.name.startsWith(NAME_PREFIX) || row.name.startsWith("or-")),
           );
+          if (filtered.length > 0 || memoryCachedRaw.length === 0) {
+            setRaw(filtered);
+            memoryCachedRaw = filtered;
+            writeCachedRaw(filtered);
+          }
         }
         // Best-effort: a failure here only costs the "live session" dot, so it
         // must never fail the whole refresh.
@@ -131,7 +166,12 @@ export function useSandboxRows(options?: {
           /* leave the previous set in place */
         }
         setLoaded(true);
+        memoryLoaded = true;
         return true;
+      } catch (err) {
+        console.warn("[useSandboxRows] refresh error:", err);
+        setLoaded(true);
+        return false;
       } finally {
         refreshPromise.current = null;
       }
@@ -169,7 +209,7 @@ export function useSandboxRows(options?: {
         void refresh();
       }, 1_200);
     });
-    const interval = window.setInterval(() => void refresh(), 60_000);
+    const interval = window.setInterval(() => void refresh(), 10_000);
     return () => {
       cancelled = true;
       if (retryTimer !== null) window.clearTimeout(retryTimer);
@@ -188,16 +228,26 @@ export function useSandboxRows(options?: {
     async (name: string) => {
       const currentBridge = getBridge();
       if (!currentBridge?.invokeDesktop) return;
-      setBusyName(name);
+      setBusyNames((prev) => new Set([...prev, name]));
       setError(null);
       try {
-        await currentBridge.invokeDesktop("openrindDeleteSandbox", name);
         onDeletedRef.current?.(name);
+        await currentBridge.invokeDesktop("openrindDeleteSandbox", name);
+        setRaw((prev) => {
+          const updated = prev.filter((r) => r.name !== name);
+          memoryCachedRaw = updated;
+          writeCachedRaw(updated);
+          return updated;
+        });
         await refresh();
       } catch (err) {
         setError(userFacingDesktopError(err));
       } finally {
-        setBusyName(null);
+        setBusyNames((prev) => {
+          const next = new Set(prev);
+          next.delete(name);
+          return next;
+        });
       }
     },
     [refresh],
@@ -228,14 +278,14 @@ export function useSandboxRows(options?: {
         displayName: sandboxDisplayName(row.name),
         created: row.created,
         phase: row.phase,
-        status: resolveSandboxStatus({ phase: row.phase, hasLiveSession }),
+        status: busyNames.has(row.name) ? "deleting" : resolveSandboxStatus({ phase: row.phase, hasLiveSession }),
         profile,
         hasLiveSession,
-        busy: busyName === row.name,
+        busy: busyNames.has(row.name),
       };
     });
     return sortByStatus(mapped, (row) => row.status);
-  }, [raw, liveSessions, busyName, labelVersion, options?.workspaces]);
+  }, [raw, liveSessions, busyNames, labelVersion, options?.workspaces]);
 
   const warningCount = useMemo(
     () => rows.filter((row) => needsUserAttention(row.status)).length,

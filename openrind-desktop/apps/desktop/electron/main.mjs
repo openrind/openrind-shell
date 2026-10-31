@@ -106,6 +106,7 @@ async function assertOpenShellReady() {
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+let lastCachedSandboxList = [];
 const NATIVE_DEEP_LINK_EVENT = "openrind-desktop:deep-link-native";
 const TAURI_APP_IDENTIFIER = "com.differentai.openrind-desktop";
 const DESKTOP_PROTOCOL_SCHEME = "openrind-desktop";
@@ -650,11 +651,13 @@ async function buildOpenrindShellPtyEnv(cols, rows, profile) {
       ? "claude"
       : profile === "openrind-shell-openclaw"
         ? "openclaw"
-        : profile === "openrind-shell-openhands" || profile === "openrind-shell-openhands-script"
-          ? "openhands"
-          : null;
+        : profile === "openrind-shell-codex"
+          ? "codex"
+          : profile === "openrind-shell-openhands" || profile === "openrind-shell-openhands-script"
+            ? "openhands"
+            : null;
   if (!agent) {
-    throw new Error("The primary FUSE runtime supports Claude, OpenClaw, and OpenHands profiles only.");
+    throw new Error("The primary FUSE runtime supports Claude, OpenClaw, Codex, and OpenHands profiles only.");
   }
   /** @type {Record<string, string>} */
   const extraEnv = {};
@@ -759,10 +762,10 @@ function openOpenrindShellPtySession(opts) {
     haloopContextId,
     haloopSessionAssertion,
   } = opts;
-  if (!["openrind-shell-claude", "openrind-shell-openclaw", "openrind-shell-openhands", "openrind-shell-openhands-script"].includes(profile)) {
-    throw new Error("The primary FUSE runtime supports Claude, OpenClaw, and OpenHands profiles only.");
+  if (!["openrind-shell-claude", "openrind-shell-openclaw", "openrind-shell-codex", "openrind-shell-openhands", "openrind-shell-openhands-script"].includes(profile)) {
+    throw new Error("The primary FUSE runtime supports Claude, OpenClaw, Codex, and OpenHands profiles only.");
   }
-  const expectedAgent = profile === "openrind-shell-claude" ? "claude" : profile === "openrind-shell-openclaw" ? "openclaw" : "openhands";
+  const expectedAgent = profile === "openrind-shell-claude" ? "claude" : profile === "openrind-shell-openclaw" ? "openclaw" : profile === "openrind-shell-codex" ? "codex" : "openhands";
   const agent = String(extraEnv?.OPENRIND_SHELL_AGENT ?? "").trim();
   if (agent !== expectedAgent) {
     throw new Error("A validated OPENRIND_SHELL_AGENT value is required for agent launch.");
@@ -809,7 +812,20 @@ function openOpenrindShellPtySession(opts) {
       let upstreamKey = "";
       try { upstreamKey = await openrindShell.requiredHaloopUpstreamApiKey(); } catch {}
       upstreamKey = (upstreamKey || process.env.ANTHROPIC_API_KEY || "").trim();
+      const [anthropicApiKey, openRouterApiKey, codexApiKey, openaiApiKey] = await Promise.all([
+        openrindCredentials.getCredential("anthropicApiKey").catch(() => null),
+        openrindCredentials.getCredential("openRouterApiKey").catch(() => null),
+        openrindCredentials.getCredential("codexApiKey").catch(() => null),
+        openrindCredentials.getCredential("openaiApiKey").catch(() => null),
+      ]);
+      const keyBundle = {
+        anthropicApiKey: anthropicApiKey || (upstreamKey.startsWith("sk-ant-") ? upstreamKey : null),
+        openRouterApiKey: openRouterApiKey || (upstreamKey.startsWith("sk-or-") ? upstreamKey : null),
+        codexApiKey: codexApiKey || (!upstreamKey.startsWith("sk-ant-") && !upstreamKey.startsWith("sk-or-") ? upstreamKey : null),
+        openaiApiKey: openaiApiKey || codexApiKey,
+      };
       await openrindShell.ensureBrowserPod(sandboxName).catch(() => {});
+      await openrindShell.ensureRuntimeScripts(sandboxName).catch(() => {});
       await writeOpenrindShellSessionMarker(
         sandboxName,
         profile,
@@ -817,7 +833,7 @@ function openOpenrindShellPtySession(opts) {
         haloopSessionAssertion,
         undefined,
         undefined,
-        upstreamKey,
+        keyBundle,
       );
       // Even a desktop launch without a session id writes the `auto` marker, so
       // every fresh connect must wait for this marker to be consumed.
@@ -2651,6 +2667,45 @@ async function handleDesktopInvoke(event, command, ...args) {
       const outPath = result.filePath.endsWith(".json") ? result.filePath : `${result.filePath}.json`;
       return ctfService.exportSellTraces(taskId, outPath, { scrubPii });
     }
+    case "openrindExportSessionTracePack": {
+      const { sandboxName, sessionId } = args[0] || {};
+      const targetName = sandboxName || sessionId || "session";
+      const filename = `${targetName}-tracepack.zip`;
+      const result = await dialog.showSaveDialog(activeWindowFromEvent(event), {
+        title: "Export Lossless TracePack Archive",
+        defaultPath: path.join(app.getPath("downloads"), filename),
+        filters: [{ name: "ZIP Archives", extensions: ["zip"] }],
+      });
+      if (result.canceled || !result.filePath) return { canceled: true };
+      const outPath = result.filePath.endsWith(".zip") ? result.filePath : `${result.filePath}.zip`;
+      const { buildTracePackFiles } = await import("./openshell/tracepack-builder.mjs");
+      const { createZipBuffer } = await import("./openshell/harbor-exporter.mjs");
+      const { files, manifest } = buildTracePackFiles({
+        trajectory: { id: targetName, task: { id: targetName } },
+      });
+      const zip = createZipBuffer(files);
+      await writeFile(outPath, zip);
+      return { success: true, filePath: outPath, manifest };
+    }
+    case "openrindExportSessionSellTraces": {
+      const { sandboxName, sessionId, scrubPii } = args[0] || {};
+      const targetName = sandboxName || sessionId || "session";
+      const filename = `${targetName}-selltraces.json`;
+      const result = await dialog.showSaveDialog(activeWindowFromEvent(event), {
+        title: "Export SellTraces Normalized JSON",
+        defaultPath: path.join(app.getPath("downloads"), filename),
+        filters: [{ name: "JSON Files", extensions: ["json"] }],
+      });
+      if (result.canceled || !result.filePath) return { canceled: true };
+      const outPath = result.filePath.endsWith(".json") ? result.filePath : `${result.filePath}.json`;
+      const { projectToSellTraces } = await import("./openshell/selltraces-projector.mjs");
+      const { sellTracesJson } = projectToSellTraces({
+        trajectory: { id: targetName, task: { id: targetName } },
+        scrubPii: scrubPii !== false,
+      });
+      await writeFile(outPath, JSON.stringify(sellTracesJson, null, 2));
+      return { success: true, filePath: outPath };
+    }
     case "ctfGetActiveDirectory":
       return ctfService.getActiveDirectory();
     case "ctfSetActiveDirectory":
@@ -2849,7 +2904,7 @@ async function handleDesktopInvoke(event, command, ...args) {
       const workspaceId = String(input.workspaceId ?? "").trim();
       const profile = String(input.profile ?? "").trim();
       if (!workspaceId) throw new Error("workspaceId is required");
-      if (!["openrind-shell-claude", "openrind-shell-openclaw", "openrind-shell-openhands", "openrind-shell-openhands-script"].includes(profile)) {
+      if (!["openrind-shell-claude", "openrind-shell-openclaw", "openrind-shell-codex", "openrind-shell-openhands", "openrind-shell-openhands-script"].includes(profile)) {
         throw new Error(`Unsupported Openrind Shell profile: ${profile}`);
       }
       await assertOpenShellReady();
@@ -2909,16 +2964,19 @@ async function handleDesktopInvoke(event, command, ...args) {
       // Returns the Openrind Desktop subset of the primary FUSE gateway's JSON
       // list. Structured output retains the lifecycle phase and creation time;
       // the names-only form intentionally omits both.
-      // Failures PROPAGATE to the renderer so a cold gateway at boot reads as
-      // "still loading, retry" rather than "no sandboxes exist".
-      const list = await openrindShell.listSandboxes();
-      return Array.isArray(list)
-        ? list.filter(
+      try {
+        const list = await openrindShell.listSandboxes();
+        if (Array.isArray(list)) {
+          lastCachedSandboxList = list.filter(
             (s) =>
               typeof s?.name === "string" &&
               (s.name.startsWith("openrind-shell-") || s.name.startsWith("or-")),
-          )
-        : [];
+          );
+        }
+      } catch (err) {
+        console.warn("[listSandboxes] Warning:", err?.message || err);
+      }
+      return lastCachedSandboxList;
     }
     case "openrindEndSession": {
       // Per spec: Openrind Shell sandboxes persist across sessions for the
@@ -2950,8 +3008,14 @@ async function handleDesktopInvoke(event, command, ...args) {
               openrindMarkerPending.delete(name);
               return openrindPty.closeSessionsForSandbox(name, "sandbox-delete");
             },
+          }).catch((err) => {
+            console.warn(`[DeleteSandbox] Haloop profile revocation error for ${name}:`, err.message);
+            return { revokedProfiles: [] };
           });
-          await openrindShell.deleteOpenrindShellSandbox(name);
+          await openrindShell.deleteOpenrindShellSandbox(name).catch((err) => {
+            console.warn(`[DeleteSandbox] OpenShell delete error for ${name}:`, err.message);
+          });
+          await wslRun(["-d", OPENSHELL_DISTRO_NAME, "--", "docker", "rm", "-f", `openrind-browser-pod-${name}`]).catch(() => undefined);
           return result;
         })());
         emitOpenrindShellSessionProgress({
@@ -2996,8 +3060,8 @@ async function handleDesktopInvoke(event, command, ...args) {
       const profile = String(input.profile ?? "").trim();
       const workspaceId = String(input.workspaceId ?? "").trim();
       if (!workspaceId) throw new Error("workspaceId is required");
-      if (!["openrind-shell-claude", "openrind-shell-openclaw", "openrind-shell-openhands", "openrind-shell-openhands-script"].includes(profile)) {
-        throw new Error("The primary FUSE runtime supports Claude, OpenClaw, and OpenHands profiles only.");
+      if (!["openrind-shell-claude", "openrind-shell-openclaw", "openrind-shell-codex", "openrind-shell-openhands", "openrind-shell-openhands-script"].includes(profile)) {
+        throw new Error("The primary FUSE runtime supports Claude, OpenClaw, Codex, and OpenHands profiles only.");
       }
       assertHaloopCredentialNotChanging(sandboxName);
       const existingHaloopSession = openrindPty.findSessionBySandboxAndAgent(
@@ -3052,8 +3116,8 @@ async function handleDesktopInvoke(event, command, ...args) {
       const profile = String(input.profile ?? "").trim();
       const workspaceId = String(input.workspaceId ?? "").trim();
       if (!workspaceId) throw new Error("workspaceId is required");
-      if (!["openrind-shell-claude", "openrind-shell-openclaw", "openrind-shell-openhands", "openrind-shell-openhands-script"].includes(profile)) {
-        throw new Error("The primary FUSE runtime supports Claude, OpenClaw, and OpenHands profiles only.");
+      if (!["openrind-shell-claude", "openrind-shell-openclaw", "openrind-shell-codex", "openrind-shell-openhands", "openrind-shell-openhands-script"].includes(profile)) {
+        throw new Error("The primary FUSE runtime supports Claude, OpenClaw, Codex, and OpenHands profiles only.");
       }
       assertHaloopCredentialNotChanging(sandboxName);
       const existing = openrindPty.findSessionBySandboxAndAgent(
@@ -3080,7 +3144,7 @@ async function handleDesktopInvoke(event, command, ...args) {
         await openrindShell.activateExistingHaloopRoute({
           sandboxName,
           workspaceId: routeWorkspaceId,
-          agentId: profile === "openrind-shell-openclaw" ? "openclaw" : profile === "openrind-shell-claude" ? "claude" : "openhands",
+          agentId: profile === "openrind-shell-openclaw" ? "openclaw" : profile === "openrind-shell-codex" ? "codex" : profile === "openrind-shell-claude" ? "claude" : "openhands",
         });
         return {
           id: existing.id,
@@ -3303,7 +3367,7 @@ async function handleDesktopInvoke(event, command, ...args) {
       const workspaceId = String(input.workspaceId ?? "").trim();
       const profile = String(input.profile ?? "").trim();
       if (!workspaceId) throw new Error("workspaceId is required");
-      if (!["openrind-shell-claude", "openrind-shell-openclaw", "openrind-shell-openhands", "openrind-shell-openhands-script"].includes(profile)) {
+      if (!["openrind-shell-claude", "openrind-shell-openclaw", "openrind-shell-codex", "openrind-shell-openhands", "openrind-shell-openhands-script"].includes(profile)) {
         throw new Error(`Unsupported Openrind Shell profile: ${profile}`);
       }
       await assertOpenShellReady();
@@ -3345,7 +3409,7 @@ async function handleDesktopInvoke(event, command, ...args) {
       const workspaceId = String(input.workspaceId ?? "").trim();
       if (!sandboxName) throw new Error("sandboxName is required");
       if (!workspaceId) throw new Error("workspaceId is required");
-      if (!["openrind-shell-claude", "openrind-shell-openclaw", "openrind-shell-openhands", "openrind-shell-openhands-script"].includes(profile)) {
+      if (!["openrind-shell-claude", "openrind-shell-openclaw", "openrind-shell-codex", "openrind-shell-openhands", "openrind-shell-openhands-script"].includes(profile)) {
         throw new Error(`Unsupported Openrind Shell profile: ${profile}`);
       }
       assertHaloopCredentialNotChanging(sandboxName);
@@ -3362,6 +3426,19 @@ async function handleDesktopInvoke(event, command, ...args) {
         let upstreamKey = "";
         try { upstreamKey = await openrindShell.requiredHaloopUpstreamApiKey(); } catch {}
         upstreamKey = (upstreamKey || process.env.ANTHROPIC_API_KEY || "").trim();
+        const [anthropicApiKey, openRouterApiKey, codexApiKey, openaiApiKey] = await Promise.all([
+          openrindCredentials.getCredential("anthropicApiKey").catch(() => null),
+          openrindCredentials.getCredential("openRouterApiKey").catch(() => null),
+          openrindCredentials.getCredential("codexApiKey").catch(() => null),
+          openrindCredentials.getCredential("openaiApiKey").catch(() => null),
+        ]);
+        const keyBundle = {
+          anthropicApiKey: anthropicApiKey || (upstreamKey.startsWith("sk-ant-") ? upstreamKey : null),
+          openRouterApiKey: openRouterApiKey || (upstreamKey.startsWith("sk-or-") ? upstreamKey : null),
+          codexApiKey: codexApiKey || (!upstreamKey.startsWith("sk-ant-") && !upstreamKey.startsWith("sk-or-") ? upstreamKey : null),
+          openaiApiKey: openaiApiKey || codexApiKey,
+        };
+        await openrindShell.ensureRuntimeScripts(sandboxName).catch(() => {});
         await writeOpenrindShellSessionMarker(
           sandboxName,
           profile,
@@ -3369,7 +3446,7 @@ async function handleDesktopInvoke(event, command, ...args) {
           haloop.sessionAssertion,
           undefined,
           undefined,
-          upstreamKey,
+          keyBundle,
         );
         const terminal = await launchExternalTerminalToSandbox(sandboxName);
         return terminal;

@@ -63,8 +63,32 @@ const PREDEFINED_CREDENTIALS: PredefinedCredentialDef[] = [
     envVarName: "ANTHROPIC_API_KEY",
     label: "ANTHROPIC_API_KEY",
     description:
-      "Upstream Anthropic API key (or OpenRouter API key) required by the host-managed Haloop edge. Desktop retains it outside the sandbox; Claude and OpenClaw receive neither this key nor a direct-provider route.",
-    placeholder: "sk-ant-... or sk-or-...",
+      "Upstream Anthropic API key required by the host-managed Haloop edge. Desktop retains it outside the sandbox; Claude and OpenClaw receive neither this key nor a direct-provider route.",
+    placeholder: "sk-ant-...",
+  },
+  {
+    statusKey: "openRouterApiKey",
+    envVarName: "OPENROUTER_API_KEY",
+    label: "OPENROUTER_API_KEY",
+    description:
+      "OpenRouter API key used as the primary inference provider for Claude, OpenClaw, and Codex CLI.",
+    placeholder: "sk-or-v1-...",
+  },
+  {
+    statusKey: "codexApiKey",
+    envVarName: "CODEX_API_KEY",
+    label: "CODEX_API_KEY",
+    description:
+      "Codex / OpenAI API key for Codex CLI (or leave blank to route Codex through your OpenRouter key).",
+    placeholder: "sk-...",
+  },
+  {
+    statusKey: "openaiApiKey",
+    envVarName: "OPENAI_API_KEY",
+    label: "OPENAI_API_KEY",
+    description:
+      "OpenAI API key for OpenClaw, OpenHands, and Codex CLI.",
+    placeholder: "sk-proj-...",
   },
   {
     statusKey: "openrindGatewayApiKey",

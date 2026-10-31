@@ -1,7 +1,15 @@
 #!/bin/sh
-export HOME="${OPENRIND_SHELL_CLAUDE_HOME:-${HOME:-/sandbox/claude-home}}"
-case "$HOME" in
-  /root|'') export HOME=/sandbox/claude-home ;;
+if [ -n "${OPENRIND_SHELL_OPENCLAW_HOME:-}" ]; then
+  export HOME="${OPENRIND_SHELL_OPENCLAW_HOME}"
+elif [ -n "${OPENRIND_SHELL_CODEX_HOME:-}" ]; then
+  export HOME="${OPENRIND_SHELL_CODEX_HOME}"
+elif [ -n "${OPENRIND_SHELL_OPENHANDS_HOME:-}" ]; then
+  export HOME="${OPENRIND_SHELL_OPENHANDS_HOME}"
+elif [ -n "${OPENRIND_SHELL_CLAUDE_HOME:-}" ]; then
+  export HOME="${OPENRIND_SHELL_CLAUDE_HOME}"
+fi
+case "${HOME:-}" in
+  /root|'') export HOME=/sandbox/work ;;
 esac
 base="$(basename "$0")"
 case "$base" in

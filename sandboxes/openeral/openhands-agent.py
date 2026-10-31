@@ -85,21 +85,56 @@ def install_session_transport(context, base_url=None):
             path_match = url.path in ('/v1/messages', '/v1/messages/count_tokens', '/v1/chat/completions', '/chat/completions')
             if host_match and port_match and path_match:
                 request.headers['x-openrind-haloop-session'] = context
-                credential = (
-                    os.environ.get('ANTHROPIC_API_KEY')
-                    or os.environ.get('OPENAI_API_KEY')
-                    or os.environ.get('LLM_API_KEY')
-                    or ''
-                )
-                openrouter_key = os.environ.get('OPENROUTER_API_KEY') or ''
+                runtime_env = {}
+                api_key_file = Path('/var/lib/openrind-shell/runtime/api-key.env')
+                if api_key_file.is_file():
+                    try:
+                        for line in api_key_file.read_text().splitlines():
+                            m = re.match(r'^\s*(?:export\s+)?([A-Za-z0-9_]+)=[\'"]?(.*?)[\'"]?\s*$', line)
+                            if m:
+                                runtime_env[m.group(1)] = m.group(2)
+                    except Exception:
+                        pass
+
+                openrouter_key = (os.environ.get('OPENROUTER_API_KEY') or runtime_env.get('OPENROUTER_API_KEY') or '').strip()
                 if openrouter_key.startswith('openshell:resolve:env:'):
                     openrouter_key = ''
+                anthropic_key = (os.environ.get('ANTHROPIC_API_KEY') or runtime_env.get('ANTHROPIC_API_KEY') or '').strip()
+                if anthropic_key.startswith('openshell:resolve:env:'):
+                    anthropic_key = ''
+                openai_key = (os.environ.get('OPENAI_API_KEY') or runtime_env.get('OPENAI_API_KEY') or os.environ.get('CODEX_API_KEY') or runtime_env.get('CODEX_API_KEY') or '').strip()
+                if openai_key.startswith('openshell:resolve:env:'):
+                    openai_key = ''
+
+                provider = 'openrouter'
+                auth_key = ''
+                if openrouter_key and not openrouter_key.startswith('sk-ant-'):
+                    provider = 'openrouter'
+                    auth_key = openrouter_key
+                elif anthropic_key and anthropic_key.startswith('sk-ant-'):
+                    provider = 'anthropic'
+                    auth_key = anthropic_key
+                elif openai_key and not openai_key.startswith('sk-ant-') and not openai_key.startswith('sk-or-'):
+                    provider = 'openai'
+                    auth_key = openai_key
+                elif anthropic_key.startswith('sk-or-'):
+                    provider = 'openrouter'
+                    auth_key = anthropic_key
+                elif anthropic_key:
+                    provider = 'anthropic'
+                    auth_key = anthropic_key
+                elif openrouter_key:
+                    provider = 'openrouter'
+                    auth_key = openrouter_key
+                elif openai_key:
+                    provider = 'openai'
+                    auth_key = openai_key
+
                 admin_token = (
                     os.environ.get('ADMIN_TOKEN')
                     or os.environ.get('W8_BYOH_ADMIN_TOKEN')
                     or 'w8-catalog-simulation-admin'
                 )
-                provider = os.environ.get('W8_HALOOP_PROVIDER') or os.environ.get('OPENRIND_GATEWAY_PROVIDER') or 'openrouter'
                 collector_url = os.environ.get('HALOOP_COLLECTOR_URL') or 'http://136.112.93.84:8788'
                 project_name = (
                     os.environ.get('OPENRIND_SHELL_WORKSPACE_ID')
@@ -128,9 +163,8 @@ def install_session_transport(context, base_url=None):
                     'output_guardrails': [{'halo.export': {'collectorURL': collector_url, 'defaultProject': project_name}, 'async': False, 'deny': False}],
                 })
                 
-                auth_key = openrouter_key or credential
                 if auth_key:
-                    request.headers['authorization'] = f"Bearer {auth_key}"
+                    request.headers['authorization'] = auth_key if auth_key.startswith('Bearer ') else f"Bearer {auth_key}"
                     request.headers['x-api-key'] = auth_key
                     request.headers['x-w8-haloop-api-key'] = auth_key
                 return True

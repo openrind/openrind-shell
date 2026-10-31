@@ -18,6 +18,7 @@ const PII_PATTERNS = [
   { name: "OpenAI API Key", regex: /sk-[a-zA-Z0-9_\-]{20,}/g },
   { name: "Bearer Token", regex: /Bearer\s+[a-zA-Z0-9_\-\.]{20,}/gi },
   { name: "Generic Secret/Password", regex: /(?:"?(?:password|secret|token|api_?key)"?\s*[:=]\s*)"([^"]+)"/gi },
+  { name: "Email Address", regex: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g },
 ];
 
 /**
@@ -49,6 +50,10 @@ export function scrubPiiText(text) {
   out = out.replace(/sk-or-[a-zA-Z0-9_\-]{20,}/g, "[REDACTED_OPENROUTER_KEY]");
   out = out.replace(/sk-[a-zA-Z0-9_\-]{20,}/g, "[REDACTED_OPENAI_KEY]");
   out = out.replace(/Bearer\s+[a-zA-Z0-9_\-\.]{20,}/gi, "Bearer [REDACTED_TOKEN]");
+  out = out.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "[REDACTED_EMAIL]");
+  out = out.replace(/(?:"?(?:password|secret|token|api_?key)"?\s*[:=]\s*)"([^"]+)"/gi, (match, val) => {
+    return match.replace(`"${val}"`, '"[REDACTED_SECRET]"');
+  });
   return out;
 }
 
@@ -72,10 +77,22 @@ export function projectToSellTraces({
   const task = trajectory.task || {};
   const taskId = task.id || "challenge";
   const startedAt = trajectory.startedAt || new Date().toISOString();
-  const traceId = trajectory.runId || trajectory.id || `${taskId}-${startedAt}`;
-  const isComplete = Boolean(trajectory.solved || trajectory.judge || trajectory.challengeEventExport?.complete);
-  const sessionHash = createHash("sha256").update(String(traceId)).digest("hex").slice(0, 12);
-  const sessionId = `${taskId}:${sessionHash}`;
+  const runId = trajectory.runId || trajectory.id || `${taskId}-${startedAt}`;
+  const traceId = typeof runId === "string" && /^[0-9a-f]{32}$/i.test(runId)
+    ? runId.toLowerCase()
+    : createHash("sha256").update(String(runId)).digest("hex").slice(0, 32);
+  const sessionId = trajectory.sessionId || `${taskId}:${traceId.slice(0, 12)}`;
+  const sourceId = trajectory.runId ? `${taskId}:${trajectory.runId}` : `${taskId}:${traceId.slice(0, 12)}`;
+
+  const steps = Array.isArray(trajectory.steps) ? trajectory.steps : [];
+  const hasCrash = Boolean(trajectory.error || trajectory.crashed || (steps && steps.some(s => s.error && s.fatal)));
+  const isComplete = !hasCrash && (
+    trajectory.status === "completed" ||
+    Boolean(trajectory.completedAt) ||
+    trajectory.exitReason === "complete" ||
+    (Array.isArray(agentEvents) && agentEvents.some(e => e.kind === "agent_complete")) ||
+    (steps.length > 0 && !trajectory.aborted && !trajectory.timedOut)
+  );
 
   const messages = [];
   const piiFindingsMap = new Map();
@@ -89,33 +106,72 @@ export function projectToSellTraces({
     return scrubPii ? scrubPiiText(text) : text;
   }
 
-  // 1. Initial System Message
-  const systemText = `You are an Openrind CTF browser agent. Target: ${task.title || taskId}. ${task.description || ""}`;
-  const systemTokenCount = Math.max(1, Math.ceil(Buffer.byteLength(systemText, "utf8") / 4));
-  messages.push({
-    position: position++,
-    role: "system",
-    content: trackPii(systemText),
-    tokenCount: systemTokenCount,
-    createdAt: startedAt,
-    timestamp: startedAt,
-  });
+  // 1. Recover Conversation from Observed Model Requests if present
+  const modelCalls = (Array.isArray(agentEvents) ? agentEvents : [])
+    .filter(e => (e.kind === "model_call" || e.kind === "model_request") && (e.request?.messages || e.messages));
+  const firstModelCall = modelCalls[0];
+  const observedReqMessages = firstModelCall?.request?.messages || firstModelCall?.messages;
 
-  // 2. Initial User Message
-  const userPrompt = `Solve the challenge: ${task.title || taskId}.`;
-  const userPromptTokens = Math.max(1, Math.ceil(Buffer.byteLength(userPrompt, "utf8") / 4));
-  messages.push({
-    position: position++,
-    role: "user",
-    content: trackPii(userPrompt),
-    tokenCount: userPromptTokens,
-    createdAt: startedAt,
-    timestamp: startedAt,
-  });
+  let recoveredFromSource = false;
+  if (Array.isArray(observedReqMessages) && observedReqMessages.length > 0) {
+    for (const msg of observedReqMessages) {
+      if (msg.role === "system") {
+        const text = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+        messages.push({
+          position: position++,
+          role: "system",
+          content: trackPii(text),
+          tokenCount: Math.max(1, Math.ceil(Buffer.byteLength(text, "utf8") / 4)),
+          createdAt: firstModelCall.at || startedAt,
+          timestamp: firstModelCall.at || startedAt,
+        });
+        recoveredFromSource = true;
+      } else if (msg.role === "user" && messages.length <= 1) {
+        const text = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+        messages.push({
+          position: position++,
+          role: "user",
+          content: trackPii(text),
+          tokenCount: Math.max(1, Math.ceil(Buffer.byteLength(text, "utf8") / 4)),
+          createdAt: firstModelCall.at || startedAt,
+          timestamp: firstModelCall.at || startedAt,
+        });
+        recoveredFromSource = true;
+      }
+    }
+  }
+
+  // Fallback to task description if no observed system/user turns
+  if (!recoveredFromSource) {
+    const systemText = `You are an Openrind CTF browser agent. Target: ${task.title || taskId}. ${task.description || ""}`;
+    const systemTokenCount = Math.max(1, Math.ceil(Buffer.byteLength(systemText, "utf8") / 4));
+    messages.push({
+      position: position++,
+      role: "system",
+      content: trackPii(systemText),
+      tokenCount: systemTokenCount,
+      estimated_token_count: true,
+      derived: true,
+      createdAt: startedAt,
+      timestamp: startedAt,
+    });
+
+    const userPrompt = `Solve the challenge: ${task.title || taskId}.`;
+    const userPromptTokens = Math.max(1, Math.ceil(Buffer.byteLength(userPrompt, "utf8") / 4));
+    messages.push({
+      position: position++,
+      role: "user",
+      content: trackPii(userPrompt),
+      tokenCount: userPromptTokens,
+      estimated_token_count: true,
+      derived: true,
+      createdAt: startedAt,
+      timestamp: startedAt,
+    });
+  }
 
   // 3. Project Steps
   // DO NOT invent tool_call structure. Keep assistant JSON action string as content.
-  const steps = Array.isArray(trajectory.steps) ? trajectory.steps : [];
   let truncatedCount = 0;
   const maxMessageLength = 16384;
 
@@ -174,7 +230,7 @@ export function projectToSellTraces({
   // 4. Construct SellTraces Trace Envelope
   const traceItem = {
     source: "local_trace_index",
-    sourceId: taskId,
+    sourceId,
     conversationId: traceId,
     sessionId,
     createTime: startedAt,
@@ -278,7 +334,7 @@ export function projectToSellTraces({
       "Model action JSON was preserved verbatim inside assistant text message content; native provider tool_calls were not invented.",
       "Independent challenge judge verdict was projected into metadata.judge rather than an unverified agent turn.",
     ],
-    linked_artifacts: truncatedCount > 0 ? [`${truncatedCount} observations truncated to 8KB; full contents preserved in TracePack`] : [],
+    linked_artifacts: truncatedCount > 0 ? [`${truncatedCount} observations truncated to ${Math.round(maxMessageLength / 1024)}KB; preserved in TracePack trace_id=${traceId}`] : [],
     truncation_applied: truncatedCount > 0,
     pii_scrubbed: scrubPii,
     pii_findings: piiFindings,

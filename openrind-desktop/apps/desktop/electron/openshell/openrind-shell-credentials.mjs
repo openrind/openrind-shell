@@ -41,11 +41,14 @@ async function getSafeStorage() {
   return safeStorage;
 }
 
-/** @typedef {"databaseUrl" | "anthropicApiKey" | "openrindGatewayApiKey" | "elevenLabsApiKey"} CredentialKey */
+/** @typedef {"databaseUrl" | "anthropicApiKey" | "openRouterApiKey" | "codexApiKey" | "openaiApiKey" | "openrindGatewayApiKey" | "elevenLabsApiKey"} CredentialKey */
 
 const CREDENTIAL_KEYS = /** @type {const} */ ([
   "databaseUrl",
   "anthropicApiKey",
+  "openRouterApiKey",
+  "codexApiKey",
+  "openaiApiKey",
   "openrindGatewayApiKey",
   // ElevenLabs Scribe API key — optional, used for voice dictation
   // in the composer and sandbox terminal.
@@ -223,8 +226,8 @@ function normalizeHaloopProfileInput(options) {
   if (!workspaceId || workspaceId.length > 512 || /[\u0000-\u001f\u007f]/.test(workspaceId)) {
     throw new Error("A valid workspace id is required for Haloop registration.");
   }
-  if (agentId !== "claude" && agentId !== "openclaw" && agentId !== "openhands") {
-    throw new Error("Haloop registration supports Claude, OpenClaw, and OpenHands only.");
+  if (agentId !== "claude" && agentId !== "openclaw" && agentId !== "codex" && agentId !== "openhands") {
+    throw new Error("Haloop registration supports Claude, OpenClaw, Codex, and OpenHands only.");
   }
   const scopeId = createHash("sha256")
     .update("openrind-haloop-profile-v1\0")

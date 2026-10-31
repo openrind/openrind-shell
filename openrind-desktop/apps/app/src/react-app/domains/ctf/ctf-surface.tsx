@@ -402,7 +402,7 @@ export function CtfSurface(props: CtfSurfaceProps) {
                   </div>
                   <div>
                     <div className="font-medium text-dls-text">TracePack (.zip)</div>
-                    <div className="text-[11px] text-dls-secondary leading-tight mt-0.5">Canonical lossless archive with OTLP and artifacts</div>
+                    <div className="text-[11px] text-dls-secondary leading-tight mt-0.5">Structured execution archive with OTLP spans, artifacts, and local export receipt</div>
                   </div>
                 </button>
 

@@ -93,6 +93,7 @@ export function SandboxPanel(props: SandboxPanelProps) {
   const [expandedAgents, setExpandedAgents] = useState<Record<string, boolean>>({
     claude: true,
     openclaw: true,
+    codex: true,
     openhands: true,
   });
 
@@ -103,20 +104,23 @@ export function SandboxPanel(props: SandboxPanelProps) {
     }));
   };
 
-  const { claudeRows, openclawRows, openhandsRows } = useMemo(() => {
+  const { claudeRows, openclawRows, codexRows, openhandsRows } = useMemo(() => {
     const claude: SandboxListRow[] = [];
     const openclaw: SandboxListRow[] = [];
+    const codex: SandboxListRow[] = [];
     const openhands: SandboxListRow[] = [];
     for (const row of filtered) {
       if (row.profile === "openrind-shell-openclaw") {
         openclaw.push(row);
+      } else if (row.profile === "openrind-shell-codex") {
+        codex.push(row);
       } else if (row.profile === "openrind-shell-openhands" || row.profile === "openrind-shell-openhands-script") {
         openhands.push(row);
       } else {
         claude.push(row);
       }
     }
-    return { claudeRows: claude, openclawRows: openclaw, openhandsRows: openhands };
+    return { claudeRows: claude, openclawRows: openclaw, codexRows: codex, openhandsRows: openhands };
   }, [filtered]);
 
   const renderSandboxRow = (row: SandboxListRow) => {
@@ -231,7 +235,7 @@ export function SandboxPanel(props: SandboxPanelProps) {
     );
   };
 
-  const renderAgentSection = (agentId: "claude" | "openclaw" | "openhands", title: string, color: string, sectionRows: SandboxListRow[]) => {
+  const renderAgentSection = (agentId: "claude" | "openclaw" | "codex" | "openhands", title: string, color: string, sectionRows: SandboxListRow[]) => {
     if (sectionRows.length === 0) return null;
     const isExpanded = expandedAgents[agentId];
     return (
@@ -383,6 +387,7 @@ export function SandboxPanel(props: SandboxPanelProps) {
           <div className="flex flex-col gap-0.5">
             {renderAgentSection("claude", "Claude Code", "#f97316", claudeRows)}
             {renderAgentSection("openclaw", "OpenClaw", "#2563eb", openclawRows)}
+            {renderAgentSection("codex", "Codex CLI", "#10b981", codexRows)}
             {renderAgentSection("openhands", "OpenHands", "#a855f7", openhandsRows)}
           </div>
         )}

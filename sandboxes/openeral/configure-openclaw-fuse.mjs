@@ -14,10 +14,10 @@ import JSON5 from "json5";
 const OPENCLAW_HOME = "/sandbox/openclaw-home";
 const WORKSPACE = "/sandbox/work";
 const PROVIDER_ID = "openrind-gateway";
+const DEFAULT_GATEWAY_URL = "http://136.112.93.84:8787";
 const PROVIDER_BASE_URL =
   process.env.OPENRIND_GATEWAY_BASE_URL ||
-  process.env.HALOOP_GATEWAY_URL ||
-  "http://136.112.93.84:8787";
+  "http://127.0.0.1:8785";
 const DEFAULT_MODEL_ID = "claude-sonnet-4-6";
 const home = resolve(process.env.HOME || OPENCLAW_HOME);
 
@@ -26,6 +26,22 @@ if (home !== OPENCLAW_HOME) {
 }
 
 const configPath = join(home, ".openclaw", "openclaw.json");
+
+function readApiKeyEnv() {
+  const p = "/var/lib/openrind-shell/runtime/api-key.env";
+  if (existsSync(p)) {
+    try {
+      const lines = readFileSync(p, "utf8").split("\n");
+      for (const line of lines) {
+        const match = line.match(/^\s*(?:export\s+)?([A-Za-z0-9_]+)=['"]?(.*?)['"]?\s*$/);
+        if (match && !process.env[match[1]]) {
+          process.env[match[1]] = match[2];
+        }
+      }
+    } catch {}
+  }
+}
+readApiKeyEnv();
 
 function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -107,19 +123,28 @@ config.agents.defaults.models[primaryModel] = isObject(
 
 config.env = isObject(config.env) ? config.env : {};
 delete config.env.OPENROUTER_API_KEY;
-delete config.env.ANTHROPIC_API_KEY;
 delete config.env.ANTHROPIC_AUTH_TOKEN;
 delete config.env.ANTHROPIC_BASE_URL;
 delete config.env.ANTHROPIC_CUSTOM_HEADERS;
-delete config.env.OPENRIND_HALOOP_SESSION_CONTEXT;
+let effectiveApiKey = process.env.ANTHROPIC_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY || "openrind-haloop-key";
+if (effectiveApiKey.startsWith("openshell:") || effectiveApiKey.startsWith("${")) {
+  effectiveApiKey = "openrind-haloop-key";
+}
+config.env.OPENAI_API_KEY = effectiveApiKey;
+config.env.ANTHROPIC_API_KEY = effectiveApiKey;
+config.env.OPENRIND_HALOOP_SESSION_CONTEXT = process.env.OPENRIND_HALOOP_SESSION_CONTEXT || "v1.00000000000000000000000000000000.1700000000.1800000000.0000000000000000000000000000000000000000000000000000000000000000";
+config.env.OPENCLAW_CHILD_OOM_SCORE_ADJ = "0";
+config.plugins = isObject(config.plugins) ? config.plugins : {};
+config.plugins.deny = ["browser"];
 delete config.models.providers.openrouter;
 delete config.models.providers["openrind-haloop"];
 delete config.models.providers.stringcost;
 delete config.models.providers.anthropic;
+delete config.models.providers.openai;
 const modelId = primaryModel.slice(providerPrefix.length);
 config.models.providers[PROVIDER_ID] = {
   baseUrl: PROVIDER_BASE_URL,
-  apiKey: "${ANTHROPIC_API_KEY}",
+  apiKey: effectiveApiKey,
   api: "anthropic-messages",
   headers: {
     "x-openrind-haloop-session": "${OPENRIND_HALOOP_SESSION_CONTEXT}",
