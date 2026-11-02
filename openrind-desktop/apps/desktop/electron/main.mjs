@@ -43,6 +43,7 @@ import * as openshellCli from "./openshell/cli.mjs";
 import * as openrindShell from "./openshell/openrind-shell.mjs";
 import * as openrindCredentials from "./openshell/openrind-shell-credentials.mjs";
 import * as openrindPty from "./openshell/openrind-shell-pty.mjs";
+import { DemonstrationRecorder } from "./openshell/demonstration-recorder.mjs";
 import {
   deriveOpenrindShellSandboxName,
   launchExternalTerminalToSandbox,
@@ -493,6 +494,7 @@ const IDLE_ROUTER_INFO = Object.freeze({
 
 let mainWindow = null;
 const pendingDeepLinks = [];
+let demonstrationRecorder = null;
 
 // OpenShell installer singleton. Only one install can run at a time; the
 // renderer drives it via openshellInstallStart / openshellInstallStatus /
@@ -3606,6 +3608,37 @@ async function handleDesktopInvoke(event, command, ...args) {
       } finally {
         openrindHaloopIntegrationMaintenance = false;
       }
+    }
+    case "demonstrationStart": {
+      const opts = args[0] || {};
+      if (!demonstrationRecorder) {
+        demonstrationRecorder = new DemonstrationRecorder({
+          getMainWindow: () => mainWindow,
+          postCollectorEvents: async (bundle) => {
+            // Post events to private Haloop collector
+            await openrindShell.requestPrivateHaloopCollector({
+              method: "POST",
+              requestPath: "/spans",
+              body: bundle.records,
+            });
+          },
+        });
+      }
+      return await demonstrationRecorder.start(opts);
+    }
+    case "demonstrationStop": {
+      if (!demonstrationRecorder) {
+        throw new Error("No demonstration recorder initialized.");
+      }
+      return await demonstrationRecorder.stop();
+    }
+    case "demonstrationRecordAction": {
+      const actionData = args[0] || {};
+      demonstrationRecorder?.recordInputEvent(actionData);
+      return { success: true };
+    }
+    case "demonstrationSnapshot": {
+      return await demonstrationRecorder?.captureSnapshot({ trigger: "manual" });
     }
     default:
       throw new Error(

@@ -116,6 +116,8 @@ function appendToBuffer(session, data) {
  * @property {Uint8Array[]} buffer        Replayable output chunks (raw bytes)
  * @property {number[]} bufferTimes       ms-since-openedAt per `buffer` chunk
  * @property {number} bufferBytes         Running byte total of `buffer`
+ * @property {Array<any>} [events]        Sequenced terminal input/output/resize events
+ * @property {number} [eventSeq]          Running terminal event sequence number
  * @property {boolean} detached           True while no renderer is attached
  * @property {boolean} paused             True while the renderer has applied
  *   backpressure (see pauseSession). Tracked so detach/attach can never leave
@@ -615,6 +617,8 @@ export async function openSession(opts) {
     buffer: [],
     bufferTimes: [],
     bufferBytes: 0,
+    events: [],
+    eventSeq: 0,
     detached: false,
     paused: false,
     exitInfo: null,
@@ -627,6 +631,12 @@ export async function openSession(opts) {
   // xterm.js expects.
   pty.onData((data) => {
     appendToBuffer(session, data);
+    session.events.push({
+      seq: ++session.eventSeq,
+      timeMs: Date.now() - session.openedAt,
+      type: "output",
+      data: typeof data === "string" ? data : new TextDecoder().decode(data),
+    });
     session.onData?.(data);
   });
 
@@ -683,7 +693,14 @@ export function writeSession(id, data) {
   // The wsl child has exited but the session is retained for replay — no
   // stdin to write to. Swallow rather than throw on a dead pty.
   if (session.exitInfo) return false;
-  session.pty.write(typeof data === "string" ? data : String(data));
+  const str = typeof data === "string" ? data : String(data);
+  session.events.push({
+    seq: ++session.eventSeq,
+    timeMs: Date.now() - session.openedAt,
+    type: "input",
+    data: str,
+  });
+  session.pty.write(str);
   return true;
 }
 
@@ -738,7 +755,19 @@ export function resizeSession(id, cols, rows) {
   }
   session.pty.resize(safeCols, safeRows);
   session.size = { cols: safeCols, rows: safeRows };
+  session.events.push({
+    seq: ++session.eventSeq,
+    timeMs: Date.now() - session.openedAt,
+    type: "resize",
+    cols: safeCols,
+    rows: safeRows,
+  });
   return true;
+}
+
+export function getTerminalEvents(id) {
+  const session = sessions.get(id);
+  return session ? [...session.events] : [];
 }
 
 /**

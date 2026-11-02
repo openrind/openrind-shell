@@ -1,6 +1,7 @@
 /** @jsxImportSource react */
 import { useEffect, useState } from "react";
-import { Settings } from "lucide-react";
+import { Monitor, Settings } from "lucide-react";
+import { DemonstrationModal } from "../../demonstration/demonstration-modal";
 
 import { t } from "../../../../i18n";
 import type { OpenrindDesktopServerStatus } from "../../../../app/lib/openrind-desktop-server";
@@ -99,6 +100,7 @@ function deriveStatusCopy(props: StatusBarProps): StatusCopy {
 }
 
 export function StatusBar(props: StatusBarProps) {
+  const [demonstrationOpen, setDemonstrationOpen] = useState(false);
   const [initializing, setInitializing] = useState(
     () => Date.now() - STATUS_BAR_BOOT_STARTED_AT < STATUS_BAR_INITIALIZING_MS,
   );
@@ -138,6 +140,16 @@ export function StatusBar(props: StatusBarProps) {
         </div>
 
         <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs text-dls-secondary transition-colors hover:bg-red-500/10 hover:text-red-500"
+            onClick={() => setDemonstrationOpen(true)}
+            title="Record a human desktop task demonstration for VLA/computer-use training"
+          >
+            <Monitor className="h-3.5 w-3.5 text-red-500" />
+            <span>Record Task</span>
+          </button>
+
           {props.showSettingsButton !== false ? (
             <button
               type="button"
@@ -155,6 +167,17 @@ export function StatusBar(props: StatusBarProps) {
           ) : null}
         </div>
       </div>
+
+      <DemonstrationModal
+        isOpen={demonstrationOpen}
+        onClose={() => setDemonstrationOpen(false)}
+        onStart={async (opts) => {
+          const bridge = (window as any).__OPENRIND_DESKTOP_ELECTRON__;
+          if (bridge?.invokeDesktop) {
+            await bridge.invokeDesktop("demonstrationStart", opts);
+          }
+        }}
+      />
     </div>
   );
 }
