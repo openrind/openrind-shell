@@ -60,6 +60,14 @@ contextBridge.exposeInMainWorld("__OPENRIND_DESKTOP_ELECTRON__", {
       return ipcRenderer.invoke("openrind-desktop:shell:relaunch");
     },
   },
+  /** Subscribe to demonstration status changes (recording started/stopped/frames update). */
+  onDemonstrationStatusChange(callback) {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on("demonstration-status-change", handler);
+    return () => {
+      ipcRenderer.removeListener("demonstration-status-change", handler);
+    };
+  },
   /** Subscribe to native application-menu actions (File > New Session, etc.). */
   onMenuAction(callback) {
     const handler = (_event, payload) => callback(payload);

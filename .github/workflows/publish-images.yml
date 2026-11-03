@@ -7,6 +7,7 @@ on:
       - browser-pods
       - run/ctf-agent
       - feature/codex
+      - feat/screen-capture
     paths:
       - 'Cargo.lock'
       - 'Cargo.toml'

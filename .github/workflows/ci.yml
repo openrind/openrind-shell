@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [nemo, browser-pods, feature/codex]
+    branches: [nemo, browser-pods, feature/codex, feat/screen-capture]
   push:
-    branches: [nemo, browser-pods, feature/codex]
+    branches: [nemo, browser-pods, feature/codex, feat/screen-capture]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
@@ -27,6 +27,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Desktop OpenShell tests
         working-directory: openrind-desktop/apps/desktop
+        env:
+          NODE_ENV: test
         run: pnpm test:openshell
       - name: Electron typecheck
         working-directory: openrind-desktop/apps/desktop

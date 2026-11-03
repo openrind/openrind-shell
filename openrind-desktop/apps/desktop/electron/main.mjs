@@ -43,6 +43,7 @@ import * as openshellCli from "./openshell/cli.mjs";
 import * as openrindShell from "./openshell/openrind-shell.mjs";
 import * as openrindCredentials from "./openshell/openrind-shell-credentials.mjs";
 import * as openrindPty from "./openshell/openrind-shell-pty.mjs";
+import { DemonstrationRecorder } from "./openshell/demonstration-recorder.mjs";
 import {
   deriveOpenrindShellSandboxName,
   launchExternalTerminalToSandbox,
@@ -493,6 +494,7 @@ const IDLE_ROUTER_INFO = Object.freeze({
 
 let mainWindow = null;
 const pendingDeepLinks = [];
+let demonstrationRecorder = null;
 
 // OpenShell installer singleton. Only one install can run at a time; the
 // renderer drives it via openshellInstallStart / openshellInstallStatus /
@@ -3606,6 +3608,126 @@ async function handleDesktopInvoke(event, command, ...args) {
       } finally {
         openrindHaloopIntegrationMaintenance = false;
       }
+    }
+    case "demonstrationStart": {
+      const opts = args[0] || {};
+      if (!demonstrationRecorder) {
+        demonstrationRecorder = new DemonstrationRecorder({
+          getMainWindow: () => mainWindow,
+          postCollectorEvents: async (bundle) => {
+            // Send captured records as app spans to POST /spans (which registers the project in store.append_span)
+            const targetSpansUrl = process.env.HALOOP_SPANS_URL?.trim() || "http://136.112.93.84:8788/spans";
+            const targetEventsUrl = process.env.HALOOP_COLLECTOR_URL?.trim() || "http://136.112.93.84:8788/internal/capture/events";
+
+            const spansBatch = [];
+            for (const record of bundle.records) {
+              spansBatch.push({
+                kind: "AGENT",
+                name: record.kind || "demonstration.observation",
+                project: bundle.project,
+                trace_id: bundle.traceId,
+                session_id: bundle.sessionId,
+                input: record.payload || {},
+                output: "recorded",
+                start: Number(BigInt(record.observed_at_unix_ns) / 1000000n) / 1000,
+                end: Number(BigInt(record.observed_at_unix_ns) / 1000000n) / 1000,
+                ok: true,
+                service_name: "openrind-demonstration-recorder",
+                attributes: {
+                  "llm.model_name": "human-vla-demonstration",
+                  "llm.provider": "desktop-recorder",
+                  "agent.name": "vla-screen-recorder",
+                },
+              });
+            }
+
+            try {
+              await fetch(targetSpansUrl, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(spansBatch),
+              });
+            } catch (err) {
+              console.warn("[DemonstrationRecorder] Failed to post spans to Haloop:", err);
+            }
+
+            for (const record of bundle.records) {
+              const eventPayload = {
+                schema_version: 1,
+                project: bundle.project,
+                session_id: bundle.sessionId,
+                event_id: record.record_id || `evt-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+                occurred_at: new Date(Number(BigInt(record.observed_at_unix_ns) / 1000000n)).toISOString(),
+                producer_version: "1.0.0",
+                data: record.payload || {},
+              };
+              try {
+                await fetch(targetEventsUrl, {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify(eventPayload),
+                });
+              } catch (err) {
+                console.warn("[DemonstrationRecorder] Failed to post record to gateway events:", err);
+              }
+            }
+
+            // Also post the artifacts (images) directly to the collector /artifacts endpoint
+            if (bundle.artifacts) {
+              const targetArtifactsUrl = process.env.HALOOP_ARTIFACTS_URL?.trim() || "http://136.112.93.84:8788/artifacts";
+              for (const [hash, item] of Object.entries(bundle.artifacts)) {
+                try {
+                  const b64 = item.buffer ? item.buffer.toString("base64") : "";
+                  await fetch(targetArtifactsUrl, {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({
+                      artifact_id: item.originalName || hash,
+                      sha256: hash,
+                      content: b64,
+                      content_type: item.mediaType || "image/jpeg",
+                    }),
+                  });
+                } catch (err) {
+                  console.warn("[DemonstrationRecorder] Failed to sync artifact:", err);
+                }
+              }
+            }
+          },
+        });
+      }
+      const result = await demonstrationRecorder.start(opts);
+      mainWindow?.webContents.send("demonstration-status-change", {
+        recording: true,
+        session: demonstrationRecorder.activeSession ? {
+          taskTitle: demonstrationRecorder.activeSession.taskTitle,
+          projectId: demonstrationRecorder.activeSession.projectId,
+          startedAt: demonstrationRecorder.activeSession.startedAt,
+          framesCount: demonstrationRecorder.activeSession.framesCount,
+          isPaused: demonstrationRecorder.activeSession.isPaused,
+        } : null,
+      });
+      return result;
+    }
+    case "demonstrationStop": {
+      if (!demonstrationRecorder) {
+        throw new Error("No demonstration recorder initialized.");
+      }
+      const result = await demonstrationRecorder.stop();
+      mainWindow?.webContents.send("demonstration-status-change", {
+        recording: false,
+        session: null,
+        result,
+      });
+      return result;
+    }
+    case "demonstrationRecordAction": {
+      const actionData = args[0] || {};
+      demonstrationRecorder?.recordInputEvent(actionData);
+      return { success: true };
+    }
+    case "demonstrationSnapshot": {
+      return await demonstrationRecorder?.captureSnapshot({ trigger: "manual" });
     }
     default:
       throw new Error(

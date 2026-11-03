@@ -11,57 +11,6 @@ patchedDependencies:
 
 importers:
 
-  packages/browser-pods:
-    dependencies:
-      ws:
-        specifier: 8.19.0
-        version: 8.19.0
-
-  packages/browser-contract:
-    dependencies:
-      zod:
-        specifier: 4.3.6
-        version: 4.3.6
-
-  packages/browser-core:
-    dependencies:
-      '@openrind/browser-contract':
-        specifier: workspace:*
-        version: link:../browser-contract
-
-  packages/browser-client:
-    dependencies:
-      '@openrind/browser-contract':
-        specifier: workspace:*
-        version: link:../browser-contract
-
-  packages/browser-drivers:
-    dependencies:
-      '@openrind/browser-contract':
-        specifier: workspace:*
-        version: link:../browser-contract
-
-  packages/browser-providers:
-    dependencies:
-      '@openrind/browser-contract':
-        specifier: workspace:*
-        version: link:../browser-contract
-      '@openrind/browser-drivers':
-        specifier: workspace:*
-        version: link:../browser-drivers
-
-  packages/browser-service:
-    dependencies:
-      '@openrind/browser-contract':
-        specifier: workspace:*
-        version: link:../browser-contract
-      '@openrind/browser-core':
-        specifier: workspace:*
-        version: link:../browser-core
-      '@openrind/browser-providers':
-        specifier: workspace:*
-        version: link:../browser-providers
-
   .:
     devDependencies:
       cross-env:
@@ -221,6 +170,9 @@ importers:
       electron-updater:
         specifier: ^6.3.9
         version: 6.8.3
+      uiohook-napi:
+        specifier: ^1.5.5
+        version: 1.5.5
     devDependencies:
       '@tauri-apps/cli':
         specifier: ^2.0.0
@@ -517,6 +469,61 @@ importers:
       vite:
         specifier: ^7.1.12
         version: 7.3.1(@types/node@25.4.0)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2)
+
+  packages/browser-client:
+    dependencies:
+      '@openrind/browser-contract':
+        specifier: workspace:*
+        version: link:../browser-contract
+
+  packages/browser-contract:
+    dependencies:
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
+
+  packages/browser-core:
+    dependencies:
+      '@openrind/browser-contract':
+        specifier: workspace:*
+        version: link:../browser-contract
+
+  packages/browser-drivers:
+    dependencies:
+      '@openrind/browser-contract':
+        specifier: workspace:*
+        version: link:../browser-contract
+
+  packages/browser-pods:
+    dependencies:
+      ws:
+        specifier: 8.19.0
+        version: 8.19.0
+
+  packages/browser-providers:
+    dependencies:
+      '@openrind/browser-contract':
+        specifier: workspace:*
+        version: link:../browser-contract
+      '@openrind/browser-drivers':
+        specifier: workspace:*
+        version: link:../browser-drivers
+
+  packages/browser-service:
+    dependencies:
+      '@openrind/browser-contract':
+        specifier: workspace:*
+        version: link:../browser-contract
+      '@openrind/browser-core':
+        specifier: workspace:*
+        version: link:../browser-core
+      '@openrind/browser-providers':
+        specifier: workspace:*
+        version: link:../browser-providers
+
+  packages/capture: {}
+
+  packages/ctf-runtime: {}
 
   packages/openrind-desktop-server-sdk:
     dependencies:
@@ -4442,6 +4449,10 @@ packages:
       encoding:
         optional: true
 
+  node-gyp-build@4.8.4:
+    resolution: {integrity: sha512-LA4ZjwlnUblHVgq0oBF3Jl/6h/Nvs5fzBLwdEF4nuxnFdsfajde4WfxtJr3CaiH+F6ewcIB/q4jQ4UzPyid+CQ==}
+    hasBin: true
+
   node-gyp@9.4.1:
     resolution: {integrity: sha512-OQkWKbjQKbGkMf/xqI1jjy3oCTgMKJac58G2+bjZb3fza6gW2YrCSdMQYaoTb70crvE//Gngr4f0AgVHmqHvBQ==}
     engines: {node: ^12.13 || ^14.13 || >=16}
@@ -5346,6 +5357,10 @@ packages:
 
   ufo@1.6.3:
     resolution: {integrity: sha512-yDJTmhydvl5lJzBmy/hyOAA0d+aqCBuwl818haVdYCRrWV84o7YyeVm4QlVHStqNrrJSTb6jKuFAVqAFsr+K3Q==}
+
+  uiohook-napi@1.5.5:
+    resolution: {integrity: sha512-oSlTdnECw2GBfsJPTbBQBeE4v/EXP0EZmX6BJq5nzH/JgFaBE8JpFwEA/kLhiEP7HxQw28FViWiYgdIZzWuuJQ==}
+    engines: {node: '>= 16'}
 
   ulid@2.4.0:
     resolution: {integrity: sha512-fIRiVTJNcSRmXKPZtGzFQv9WRrZ3M9eoptl/teFJvjOzmpU+/K/JH6HZ8deBfb5vMEpicJcLn7JmvdknlMq7Zg==}
@@ -10167,6 +10182,8 @@ snapshots:
     optionalDependencies:
       encoding: 0.1.13
 
+  node-gyp-build@4.8.4: {}
+
   node-gyp@9.4.1:
     dependencies:
       env-paths: 2.2.1
@@ -11155,6 +11172,10 @@ snapshots:
   typescript@5.9.3: {}
 
   ufo@1.6.3: {}
+
+  uiohook-napi@1.5.5:
+    dependencies:
+      node-gyp-build: 4.8.4
 
   ulid@2.4.0: {}
 

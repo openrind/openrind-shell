@@ -109,13 +109,13 @@ import type { SidebarTab } from "../domains/session/sidebar/sidebar-tabs";
 import { CtfTaskSidebar, type CtfTask } from "../domains/ctf/ctf-task-sidebar";
 import { CtfSurface } from "../domains/ctf/ctf-surface";
 import { ImportTaskModal } from "../domains/ctf/import-task-modal";
+import { DemonstrationSurface } from "../domains/demonstration/surface/demonstration-surface";
 
 type SelectedSandbox = {
   name: string;
   profile: SandboxProfile;
 };
 
-// Route navigation unmounts SessionRoute, but it must not turn a settings visit
 // into a new sandbox launch. Keep the selection for this renderer lifetime only
 // (a full app launch still starts on the normal chat interface).
 let retainedSandboxSelection: SelectedSandbox | null = null;
@@ -373,6 +373,17 @@ function isChatWorkspace(workspace: RouteWorkspace): boolean {
 }
 
 export function SessionRoute() {
+  const [activeDemonstration, setActiveDemonstration] = useState(false);
+
+  useEffect(() => {
+    const bridge = (window as any).__OPENRIND_DESKTOP_ELECTRON__;
+    if (!bridge?.onDemonstrationStatusChange) return;
+
+    const cleanup = bridge.onDemonstrationStatusChange((data: any) => {
+      setActiveDemonstration(Boolean(data?.recording || data?.result));
+    });
+    return cleanup;
+  }, []);
   const navigate = useNavigate();
   const platform = usePlatform();
   const local = useLocal();
@@ -1986,7 +1997,9 @@ export function SessionRoute() {
       selectedSessionId={selectedSessionId}
       selectedWorkspaceId={selectedWorkspaceId}
       sessionSurfaceOverride={
-        selectedSandbox ? (
+        activeDemonstration ? (
+          <DemonstrationSurface />
+        ) : selectedSandbox ? (
           // Keyed on the sandbox name so switching sidebar entries swaps
           // terminals cleanly. Every sandbox owns its own PTY in the main
           // process (sessions are concurrent): switching away detaches and
