@@ -3672,29 +3672,20 @@ async function handleDesktopInvoke(event, command, ...args) {
               }
             }
 
-            // Also post the artifacts (images) directly to the capture artifacts endpoint
+            // Also post the artifacts (images) directly to the collector /artifacts endpoint
             if (bundle.artifacts) {
+              const targetArtifactsUrl = process.env.HALOOP_ARTIFACTS_URL?.trim() || "http://136.112.93.84:8788/artifacts";
               for (const [hash, item] of Object.entries(bundle.artifacts)) {
                 try {
-                  await fetch(targetEventsUrl, {
+                  const b64 = item.buffer ? item.buffer.toString("base64") : "";
+                  await fetch(targetArtifactsUrl, {
                     method: "POST",
                     headers: { "content-type": "application/json" },
                     body: JSON.stringify({
-                      schema_version: 1,
-                      project: bundle.project,
-                      session_id: bundle.sessionId,
-                      event_id: `art-${hash.slice(0, 16)}`,
-                      occurred_at: new Date().toISOString(),
-                      producer_version: "1.0.0",
-                      data: {
-                        type: "artifact.recorded",
-                        artifact_id: item.originalName || hash,
-                        kind: "tool_output",
-                        content: item.buffer ? item.buffer.toString("base64") : "",
-                        content_type: item.mediaType || "image/jpeg",
-                        sha256: hash,
-                        boundary: "observation",
-                      },
+                      artifact_id: item.originalName || hash,
+                      sha256: hash,
+                      content: b64,
+                      content_type: item.mediaType || "image/jpeg",
                     }),
                   });
                 } catch (err) {

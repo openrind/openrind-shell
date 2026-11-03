@@ -5,9 +5,98 @@ import { createHash } from "node:crypto";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 const execAsync = promisify(exec);
-import { CaptureProducer } from "../../../../packages/capture/src/producer.mjs";
-import { createRunIdentity } from "../../../../packages/capture/src/identity.mjs";
 import { scrubPiiText } from "./selltraces-projector.mjs";
+
+class DemonstrationArtifactStore {
+  constructor() {
+    this.artifacts = new Map();
+  }
+
+  record(name, content, mediaType = "text/plain") {
+    const buf = Buffer.isBuffer(content) ? content : Buffer.from(String(content ?? ""), "utf8");
+    const hash = createHash("sha256").update(buf).digest("hex");
+    if (!this.artifacts.has(hash)) {
+      this.artifacts.set(hash, {
+        hash,
+        size: buf.length,
+        mediaType,
+        originalName: name,
+        buffer: buf,
+      });
+    }
+    return hash;
+  }
+
+  get(hash) {
+    return this.artifacts.get(hash) || null;
+  }
+
+  getManifest() {
+    const manifest = {};
+    for (const [hash, item] of this.artifacts.entries()) {
+      manifest[hash] = {
+        hash: item.hash,
+        size: item.size,
+        mediaType: item.mediaType,
+        originalName: item.originalName,
+        buffer: item.buffer,
+      };
+    }
+    return manifest;
+  }
+}
+
+class DemonstrationProducer {
+  constructor({ identity, producerId = "workflow-recorder", producerInstanceId = "desktop-host" }) {
+    this.identity = identity;
+    this.producerId = producerId;
+    this.producerInstanceId = producerInstanceId;
+    this.artifactStore = new DemonstrationArtifactStore();
+    this.records = [];
+    this.sequence = 1;
+    this.isSealed = false;
+  }
+
+  emit({ kind = "event", observedAtUnixNs = null, payload = {} }) {
+    if (this.isSealed) return null;
+    const record = {
+      record_id: `rec-${this.identity.run_id}-${this.sequence}`,
+      run_id: this.identity.run_id,
+      trace_id: this.identity.trace_id,
+      span_id: this.identity.root_span_id,
+      session_id: this.identity.session_id,
+      producer_id: this.producerId,
+      producer_instance_id: this.producerInstanceId,
+      sequence: this.sequence++,
+      kind,
+      observed_at_unix_ns: observedAtUnixNs || String(BigInt(Date.now()) * 1000000n),
+      payload,
+    };
+    this.records.push(record);
+    return record;
+  }
+
+  recordArtifact(name, content, mediaType) {
+    return this.artifactStore.record(name, content, mediaType);
+  }
+
+  seal({ complete = true } = {}) {
+    this.isSealed = true;
+    return {
+      receipt: {
+        run_id: this.identity.run_id,
+        state: complete ? "sealed_complete" : "sealed_partial",
+        seal_verified: true,
+      },
+      totalRecords: this.records.length,
+      artifacts: this.artifactStore.getManifest(),
+    };
+  }
+
+  getRecords() {
+    return [...this.records];
+  }
+}
 
 let uIOhook = null;
 try {
@@ -28,24 +117,45 @@ export function slugifyProject(title) {
   return slug || "workflow-demo";
 }
 
-export async function getActiveWindow() {
+let cachedActiveWindow = { title: "Desktop Application", process: "DESKTOP" };
+let windowPollTimer = null;
+
+function startWindowPolling() {
+  if (process.env.NODE_ENV === "test") return;
+  if (windowPollTimer) return;
+
+  const poll = async () => {
+    if (process.platform === "win32") {
+      try {
+        const psCommand = `powershell -NoProfile -Command "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; using System.Text; public class Win { [DllImport(\\\"user32.dll\\\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\\\"user32.dll\\\", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder strText, int maxCount); [DllImport(\\\"user32.dll\\\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid); }'; $hwnd = [Win]::GetForegroundWindow(); $sb = New-Object System.Text.StringBuilder 256; $null = [Win]::GetWindowText($hwnd, $sb, 256); $pidOut = 0; $null = [Win]::GetWindowThreadProcessId($hwnd, [ref]$pidOut); $p = Get-Process -Id $pidOut -ErrorAction SilentlyContinue; @{ title = $sb.ToString(); process = $p.ProcessName } | ConvertTo-Json -Compress"`;
+        const { stdout } = await execAsync(psCommand, { timeout: 1200 });
+        if (stdout) {
+          const parsed = JSON.parse(stdout.trim());
+          cachedActiveWindow = {
+            title: parsed.title || "Desktop",
+            process: (parsed.process || "unknown").toUpperCase(),
+          };
+        }
+      } catch {}
+    }
+  };
+
+  void poll();
+  windowPollTimer = setInterval(poll, 1500);
+}
+
+function stopWindowPolling() {
+  if (windowPollTimer) {
+    clearInterval(windowPollTimer);
+    windowPollTimer = null;
+  }
+}
+
+export function getActiveWindow() {
   if (process.env.NODE_ENV === "test") {
     return { title: "Test Window", process: "TEST" };
   }
-  if (process.platform === "win32") {
-    try {
-      const psCommand = `powershell -NoProfile -Command "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; using System.Text; public class Win { [DllImport(\\\"user32.dll\\\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\\\"user32.dll\\\", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder strText, int maxCount); [DllImport(\\\"user32.dll\\\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid); }'; $hwnd = [Win]::GetForegroundWindow(); $sb = New-Object System.Text.StringBuilder 256; $null = [Win]::GetWindowText($hwnd, $sb, 256); $pidOut = 0; $null = [Win]::GetWindowThreadProcessId($hwnd, [ref]$pidOut); $p = Get-Process -Id $pidOut -ErrorAction SilentlyContinue; @{ title = $sb.ToString(); process = $p.ProcessName } | ConvertTo-Json -Compress"`;
-      const { stdout } = await execAsync(psCommand, { timeout: 800 });
-      if (stdout) {
-        const parsed = JSON.parse(stdout.trim());
-        return {
-          title: parsed.title || "Desktop",
-          process: (parsed.process || "unknown").toUpperCase(),
-        };
-      }
-    } catch {}
-  }
-  return { title: "Desktop Application", process: "DESKTOP" };
+  return cachedActiveWindow;
 }
 
 export class DemonstrationRecorder {
@@ -74,21 +184,16 @@ export class DemonstrationRecorder {
     const sessionId = `session-${runId}`;
     const traceId = createHash("md5").update(runId).digest("hex");
 
-    const identity = createRunIdentity({
-      runId,
-      taskId: projectId,
-      sessionId,
-      rootSpanId: traceId.slice(0, 16),
-    });
+    const identity = {
+      run_id: runId,
+      task_id: projectId,
+      session_id: sessionId,
+      trace_id: traceId,
+      root_span_id: traceId.slice(0, 16),
+    };
 
-    const producer = new CaptureProducer({
-      identity: {
-        ...identity,
-        trace_id: traceId,
-        run_id: runId,
-        session_id: sessionId,
-        root_span_id: traceId.slice(0, 16),
-      },
+    const producer = new DemonstrationProducer({
+      identity,
       producerId: "workflow-recorder",
       producerInstanceId: "desktop-host",
     });
@@ -136,6 +241,7 @@ export class DemonstrationRecorder {
     this._startCaptureLoop();
     this._startMouseTracker();
     this._startGlobalInputHook();
+    startWindowPolling();
 
     return {
       started: true,
@@ -194,55 +300,89 @@ export class DemonstrationRecorder {
     this.textBuffer = "";
     this.textDebounce = null;
 
+    const keycodeMap = {
+      2: "1", 3: "2", 4: "3", 5: "4", 6: "5", 7: "6", 8: "7", 9: "8", 10: "9", 11: "0",
+      12: "-", 13: "=", 14: "[Backspace]", 15: "[Tab]",
+      16: "q", 17: "w", 18: "e", 19: "r", 20: "t", 21: "y", 22: "u", 23: "i", 24: "o", 25: "p",
+      26: "[", 27: "]", 28: "[Enter]",
+      30: "a", 31: "s", 32: "d", 33: "f", 34: "g", 35: "h", 36: "j", 37: "k", 38: "l",
+      39: ";", 40: "'", 41: "`",
+      44: "z", 45: "x", 46: "c", 47: "v", 48: "b", 49: "n", 50: "m",
+      51: ",", 52: ".", 53: "/", 57: " ",
+      3675: "[Windows]", 3676: "[Windows]", 3612: "[Enter]",
+    };
+
+    const flushText = () => {
+      if (this.textBuffer) {
+        const text = this.textBuffer;
+        this.textBuffer = "";
+        this.recordInputEvent({
+          type: "type_text",
+          text,
+        });
+      }
+    };
+
     this.onKeyDown = (e) => {
       if (!this.activeSession || this.activeSession.isPaused) return;
-      // Handle printable character codes directly from keydown (works uniformly across Windows/macOS/Linux)
-      const rawKey = e.keychar ? String.fromCharCode(e.keychar) : null;
-      if (rawKey && rawKey.length === 1 && rawKey.charCodeAt(0) >= 32) {
-        this.textBuffer += rawKey;
+
+      const specialKey = keycodeMap[e.keycode];
+
+      // Handle hotkeys and special keys
+      if (e.keycode === 3675 || e.keycode === 3676) { // Windows Key
+        flushText();
+        this.recordInputEvent({
+          type: "key_press",
+          key: "Super",
+        });
+        return;
       }
 
-      // Enter key or Tab key finishes the typed text chunk immediately
-      if (e.keycode === 28 || e.keycode === 0x0E || e.keycode === 15) {
-        if (this.textBuffer) {
-          const text = this.textBuffer;
-          this.textBuffer = "";
+      if (e.keycode === 28 || e.keycode === 3612) { // Enter
+        flushText();
+        this.recordInputEvent({
+          type: "key_press",
+          key: "Enter",
+        });
+        return;
+      }
+
+      if (e.keycode === 14) { // Backspace
+        if (this.textBuffer.length > 0) {
+          this.textBuffer = this.textBuffer.slice(0, -1);
+        } else {
           this.recordInputEvent({
-            type: "type_text",
-            text,
+            type: "key_press",
+            key: "Backspace",
           });
         }
-      } else {
+        return;
+      }
+
+      let char = null;
+      if (e.keychar && e.keychar >= 32) {
+        char = String.fromCharCode(e.keychar);
+      } else if (specialKey && !specialKey.startsWith("[")) {
+        char = specialKey;
+      }
+
+      if (char) {
+        this.textBuffer += char;
         if (this.textDebounce) clearTimeout(this.textDebounce);
-        this.textDebounce = setTimeout(() => {
-          if (this.textBuffer) {
-            const text = this.textBuffer;
-            this.textBuffer = "";
-            this.recordInputEvent({
-              type: "type_text",
-              text,
-            });
-          }
-        }, 500);
+        this.textDebounce = setTimeout(flushText, 350);
       }
     };
 
     this.onKeyTyped = (e) => {
       if (!this.activeSession || this.activeSession.isPaused) return;
-      const char = String.fromCharCode(e.keychar || e.rawcode || 0);
-      if (char && char.length === 1 && char.charCodeAt(0) >= 32) {
-        this.textBuffer += char;
+      const rawCode = e.keychar || e.rawcode || 0;
+      if (rawCode >= 32) {
+        const char = String.fromCharCode(rawCode);
+        if (char && !this.textBuffer.endsWith(char)) {
+          this.textBuffer += char;
+        }
         if (this.textDebounce) clearTimeout(this.textDebounce);
-        this.textDebounce = setTimeout(() => {
-          if (this.textBuffer) {
-            const text = this.textBuffer;
-            this.textBuffer = "";
-            this.recordInputEvent({
-              type: "type_text",
-              text,
-            });
-          }
-        }, 500);
+        this.textDebounce = setTimeout(flushText, 350);
       }
     };
 
@@ -342,6 +482,7 @@ export class DemonstrationRecorder {
       },
     });
 
+
     this.activeSession.framesCount++;
     this._updateFloatingState();
     return event;
@@ -403,6 +544,24 @@ export class DemonstrationRecorder {
       }
       this._stopMouseTracker();
       this._stopGlobalInputHook();
+      stopWindowPolling();
+
+      // Immediately notify the main window UI that recording has ended
+      const mainWindow = this.getMainWindow?.();
+      try {
+        mainWindow?.webContents?.send("demonstration-status-change", {
+          recording: false,
+          session: null,
+          result: {
+            success: true,
+            projectId: this.activeSession?.projectId || "demonstration",
+            taskTitle: this.activeSession?.taskTitle || "Task",
+            framesCount: this.activeSession?.framesCount || 0,
+            actionsCount: this.activeSession?.inputEventsCount || 0,
+            transmitted: true,
+          },
+        });
+      } catch {}
 
       // Immediately close floating widget and restore main window so the user is never kept waiting
       if (this.floatingWindow && !this.floatingWindow.isDestroyed()) {
@@ -410,7 +569,6 @@ export class DemonstrationRecorder {
         this.floatingWindow = null;
       }
 
-      const mainWindow = this.getMainWindow?.();
       if (mainWindow && !mainWindow.isDestroyed()) {
         if (typeof mainWindow.isMinimized === "function" && mainWindow.isMinimized()) {
           mainWindow.restore?.();
