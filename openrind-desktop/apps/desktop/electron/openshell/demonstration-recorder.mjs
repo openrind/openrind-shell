@@ -101,8 +101,9 @@ export class DemonstrationRecorder {
       mainWindow.minimize();
     }
 
-    // Start screen capture loop
+    // Start screen capture loop & mouse/cursor position tracking
     this._startCaptureLoop();
+    this._startMouseTracker();
 
     return {
       started: true,
@@ -110,6 +111,26 @@ export class DemonstrationRecorder {
       runId,
       taskTitle: cleanTitle,
     };
+  }
+
+  _startMouseTracker() {
+    this.mouseTimer = setInterval(() => {
+      if (!this.activeSession || this.activeSession.isPaused) return;
+      try {
+        const point = screen.getCursorScreenPoint();
+        if (!this.lastPoint || Math.abs(point.x - this.lastPoint.x) > 40 || Math.abs(point.y - this.lastPoint.y) > 40) {
+          this.lastPoint = point;
+          this.activeSession.lastCursorPoint = point;
+        }
+      } catch {}
+    }, 200);
+  }
+
+  _stopMouseTracker() {
+    if (this.mouseTimer) {
+      clearInterval(this.mouseTimer);
+      this.mouseTimer = null;
+    }
   }
 
   _startCaptureLoop() {
@@ -158,18 +179,24 @@ export class DemonstrationRecorder {
 
     const artifact = this.activeSession.producer.recordArtifact(
       artifactName,
-      base64Data,
+      buffer,
       "image/jpeg",
     );
 
+    const cursor = this.activeSession.lastCursorPoint || screen.getCursorScreenPoint?.() || { x: 0, y: 0 };
     const event = this.activeSession.producer.emit({
       kind: "screen_observation",
       observedAtUnixNs: String(BigInt(Date.now()) * 1000000n),
       payload: {
         artifactId: artifact.id,
+        artifactUrl: `http://136.112.93.84:8788/artifacts/${artifact.id}`,
         sha256: frameHash,
         width: image.getSize().width,
         height: image.getSize().height,
+        cursor: {
+          x: cursor.x,
+          y: cursor.y,
+        },
         trigger,
         action: action || null,
       },
@@ -201,12 +228,17 @@ export class DemonstrationRecorder {
   pause() {
     if (!this.activeSession) return;
     this.activeSession.isPaused = true;
+    if (this.captureTimer) {
+      clearInterval(this.captureTimer);
+      this.captureTimer = null;
+    }
     this._updateFloatingState();
   }
 
   resume() {
     if (!this.activeSession) return;
     this.activeSession.isPaused = false;
+    this._startCaptureLoop();
     this._updateFloatingState();
   }
 
@@ -219,6 +251,7 @@ export class DemonstrationRecorder {
       clearInterval(this.captureTimer);
       this.captureTimer = null;
     }
+    this._stopMouseTracker();
 
     const session = this.activeSession;
     const producer = session.producer;
@@ -314,8 +347,8 @@ export class DemonstrationRecorder {
       hasShadow: true,
       focusable: true,
       webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true,
+        nodeIntegration: true,
+        contextIsolation: false,
       },
     });
 
@@ -330,15 +363,14 @@ export class DemonstrationRecorder {
         <style>
           * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; user-select: none; }
           body {
-            background: rgba(18, 18, 24, 0.92);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-radius: 35px;
+            background: #121218;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 20px;
             color: #fff;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 8px 16px;
+            padding: 8px 14px;
             height: 100vh;
             -webkit-app-region: drag;
           }
@@ -354,19 +386,19 @@ export class DemonstrationRecorder {
           .frames { font-size: 11px; color: #a1a1aa; }
           .btn-group { display: flex; gap: 8px; -webkit-app-region: no-drag; }
           button {
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            color: #fff;
-            padding: 6px 12px;
-            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #e4e4e7;
+            padding: 5px 12px;
+            border-radius: 8px;
             font-size: 12px;
             font-weight: 500;
             cursor: pointer;
             transition: all 0.15s ease;
           }
-          button:hover { background: rgba(255, 255, 255, 0.2); }
-          button.finish { background: #ef4444; border-color: #dc2626; }
-          button.finish:hover { background: #dc2626; }
+          button:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+          button.finish { background: #dc2626; border-color: #b91c1c; color: #fff; }
+          button.finish:hover { background: #b91c1c; }
         </style>
       </head>
       <body>
@@ -402,11 +434,13 @@ export class DemonstrationRecorder {
             isPaused = !isPaused;
             dotEl.className = isPaused ? 'rec-dot paused' : 'rec-dot';
             pauseBtn.textContent = isPaused ? 'Resume' : 'Pause';
-            window.parentWidget?.onAction(isPaused ? 'pause' : 'resume');
+            const { ipcRenderer } = require('electron');
+            ipcRenderer.send('demonstration-widget-action', isPaused ? 'pause' : 'resume');
           }
 
           function finish() {
-            window.parentWidget?.onAction('finish');
+            const { ipcRenderer } = require('electron');
+            ipcRenderer.send('demonstration-widget-action', 'finish');
           }
         </script>
       </body>
@@ -415,14 +449,48 @@ export class DemonstrationRecorder {
 
     await this.floatingWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
 
-    // Listen for widget actions via an exposed handler
-    this.floatingWindow.webContents.executeJavaScript(`
-      window.parentWidget = {
-        onAction: (act) => {
-          console.log('Widget action:', act);
+    // Expose IPCRenderer bridge for floating widget actions
+    this.floatingWindow.webContents.ipc.on("demonstration-widget-action", async (_evt, action) => {
+      if (action === "pause") {
+        this.pause();
+        const mainWindow = this.getMainWindow?.();
+        mainWindow?.webContents.send("demonstration-status-change", {
+          recording: true,
+          session: this.activeSession ? {
+            taskTitle: this.activeSession.taskTitle,
+            projectId: this.activeSession.projectId,
+            startedAt: this.activeSession.startedAt,
+            framesCount: this.activeSession.framesCount,
+            isPaused: true,
+          } : null,
+        });
+      } else if (action === "resume") {
+        this.resume();
+        const mainWindow = this.getMainWindow?.();
+        mainWindow?.webContents.send("demonstration-status-change", {
+          recording: true,
+          session: this.activeSession ? {
+            taskTitle: this.activeSession.taskTitle,
+            projectId: this.activeSession.projectId,
+            startedAt: this.activeSession.startedAt,
+            framesCount: this.activeSession.framesCount,
+            isPaused: false,
+          } : null,
+        });
+      } else if (action === "finish") {
+        try {
+          const result = await this.stop();
+          const mainWindow = this.getMainWindow?.();
+          mainWindow?.webContents.send("demonstration-status-change", {
+            recording: false,
+            session: null,
+            result,
+          });
+        } catch (err) {
+          console.error("[DemonstrationRecorder] Error stopping recording from widget:", err);
         }
-      };
-    `);
+      }
+    });
   }
 
   _updateFloatingState() {
@@ -433,5 +501,20 @@ export class DemonstrationRecorder {
         document.getElementById('frames').textContent = '${frames} frames';
       }
     `).catch(() => {});
+
+    // Sync live frame count & duration with main window UI
+    const mainWindow = this.getMainWindow?.();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("demonstration-status-change", {
+        recording: true,
+        session: {
+          taskTitle: this.activeSession.taskTitle,
+          projectId: this.activeSession.projectId,
+          startedAt: this.activeSession.startedAt,
+          framesCount: this.activeSession.framesCount,
+          isPaused: this.activeSession.isPaused,
+        },
+      });
+    }
   }
 }

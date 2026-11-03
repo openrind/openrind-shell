@@ -3615,22 +3615,115 @@ async function handleDesktopInvoke(event, command, ...args) {
         demonstrationRecorder = new DemonstrationRecorder({
           getMainWindow: () => mainWindow,
           postCollectorEvents: async (bundle) => {
-            // Post events to private Haloop collector
-            await openrindShell.requestPrivateHaloopCollector({
-              method: "POST",
-              requestPath: "/spans",
-              body: bundle.records,
-            });
+            // Send captured records as app spans to POST /spans (which registers the project in store.append_span)
+            const targetSpansUrl = process.env.HALOOP_SPANS_URL?.trim() || "http://136.112.93.84:8788/spans";
+            const targetEventsUrl = process.env.HALOOP_COLLECTOR_URL?.trim() || "http://136.112.93.84:8788/internal/capture/events";
+
+            const spansBatch = [];
+            for (const record of bundle.records) {
+              spansBatch.push({
+                kind: "AGENT",
+                name: record.kind || "demonstration.observation",
+                project: bundle.project,
+                trace_id: bundle.traceId,
+                session_id: bundle.sessionId,
+                input: record.payload || {},
+                output: "recorded",
+                start: Number(BigInt(record.observed_at_unix_ns) / 1000000n) / 1000,
+                end: Number(BigInt(record.observed_at_unix_ns) / 1000000n) / 1000,
+                ok: true,
+                service_name: "openrind-demonstration-recorder",
+              });
+            }
+
+            try {
+              await fetch(targetSpansUrl, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(spansBatch),
+              });
+            } catch (err) {
+              console.warn("[DemonstrationRecorder] Failed to post spans to Haloop:", err);
+            }
+
+            for (const record of bundle.records) {
+              const eventPayload = {
+                schema_version: 1,
+                project: bundle.project,
+                session_id: bundle.sessionId,
+                event_id: record.record_id || `evt-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+                occurred_at: new Date(Number(BigInt(record.observed_at_unix_ns) / 1000000n)).toISOString(),
+                producer_version: "1.0.0",
+                data: record.payload || {},
+              };
+              try {
+                await fetch(targetEventsUrl, {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify(eventPayload),
+                });
+              } catch (err) {
+                console.warn("[DemonstrationRecorder] Failed to post record to gateway events:", err);
+              }
+            }
+
+            // Also post the artifacts (images) directly to the capture artifacts endpoint
+            if (bundle.artifacts) {
+              for (const [hash, item] of Object.entries(bundle.artifacts)) {
+                try {
+                  await fetch(targetEventsUrl, {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({
+                      schema_version: 1,
+                      project: bundle.project,
+                      session_id: bundle.sessionId,
+                      event_id: `art-${hash.slice(0, 16)}`,
+                      occurred_at: new Date().toISOString(),
+                      producer_version: "1.0.0",
+                      data: {
+                        type: "artifact.recorded",
+                        artifact_id: item.originalName || hash,
+                        kind: "tool_output",
+                        content: item.buffer ? item.buffer.toString("base64") : "",
+                        content_type: item.mediaType || "image/jpeg",
+                        sha256: hash,
+                        boundary: "observation",
+                      },
+                    }),
+                  });
+                } catch (err) {
+                  console.warn("[DemonstrationRecorder] Failed to sync artifact:", err);
+                }
+              }
+            }
           },
         });
       }
-      return await demonstrationRecorder.start(opts);
+      const result = await demonstrationRecorder.start(opts);
+      mainWindow?.webContents.send("demonstration-status-change", {
+        recording: true,
+        session: demonstrationRecorder.activeSession ? {
+          taskTitle: demonstrationRecorder.activeSession.taskTitle,
+          projectId: demonstrationRecorder.activeSession.projectId,
+          startedAt: demonstrationRecorder.activeSession.startedAt,
+          framesCount: demonstrationRecorder.activeSession.framesCount,
+          isPaused: demonstrationRecorder.activeSession.isPaused,
+        } : null,
+      });
+      return result;
     }
     case "demonstrationStop": {
       if (!demonstrationRecorder) {
         throw new Error("No demonstration recorder initialized.");
       }
-      return await demonstrationRecorder.stop();
+      const result = await demonstrationRecorder.stop();
+      mainWindow?.webContents.send("demonstration-status-change", {
+        recording: false,
+        session: null,
+        result,
+      });
+      return result;
     }
     case "demonstrationRecordAction": {
       const actionData = args[0] || {};
