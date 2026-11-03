@@ -430,7 +430,7 @@ export class DemonstrationRecorder {
   }
 
   async captureSnapshot({ trigger = "manual", action = null } = {}) {
-    if (!this.activeSession) return null;
+    if (!this.activeSession || isTestEnv() || !desktopCapturer?.getSources) return null;
 
     const sources = await desktopCapturer.getSources({
       types: ["screen"],
