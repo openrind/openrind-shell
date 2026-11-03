@@ -120,8 +120,12 @@ export function slugifyProject(title) {
 let cachedActiveWindow = { title: "Desktop Application", process: "DESKTOP" };
 let windowPollTimer = null;
 
+function isTestEnv() {
+  return process.env.NODE_ENV === "test" || process.argv.some((a) => a.includes("test"));
+}
+
 function startWindowPolling() {
-  if (process.env.NODE_ENV === "test") return;
+  if (isTestEnv()) return;
   if (windowPollTimer) return;
 
   const poll = async () => {
@@ -152,7 +156,7 @@ function stopWindowPolling() {
 }
 
 export function getActiveWindow() {
-  if (process.env.NODE_ENV === "test") {
+  if (isTestEnv()) {
     return { title: "Test Window", process: "TEST" };
   }
   return cachedActiveWindow;
@@ -272,7 +276,7 @@ export class DemonstrationRecorder {
   }
 
   _startGlobalInputHook() {
-    if (!uIOhook || typeof uIOhook.start !== "function") return;
+    if (isTestEnv() || !uIOhook || typeof uIOhook.start !== "function") return;
 
     this.onMouseDown = (e) => {
       if (!this.activeSession || this.activeSession.isPaused) return;
