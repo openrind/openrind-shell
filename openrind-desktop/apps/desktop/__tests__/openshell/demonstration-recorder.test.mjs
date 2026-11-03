@@ -26,6 +26,9 @@ test("DemonstrationRecorder initializes, seals, and records actions", async () =
     show() {},
     focus() {},
     isDestroyed() { return false; },
+    webContents: {
+      send() {},
+    },
   };
 
   const recorder = new DemonstrationRecorder({
