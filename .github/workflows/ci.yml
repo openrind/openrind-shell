@@ -27,6 +27,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Desktop OpenShell tests
         working-directory: openrind-desktop/apps/desktop
+        env:
+          NODE_ENV: test
         run: pnpm test:openshell
       - name: Electron typecheck
         working-directory: openrind-desktop/apps/desktop
