@@ -1,10 +1,21 @@
 // Desktop Workflow Demonstration Recorder (VLA & Human Task Demonstration Capture)
 import electron from "electron";
-const { BrowserWindow, desktopCapturer, screen } = electron;
+const { BrowserWindow, desktopCapturer, ipcMain, screen } = electron;
 import { createHash } from "node:crypto";
-import { CaptureProducer } from "@openrind/capture";
-import { createRunIdentity } from "@openrind/capture";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
+const execAsync = promisify(exec);
+import { CaptureProducer } from "../../../../packages/capture/src/producer.mjs";
+import { createRunIdentity } from "../../../../packages/capture/src/identity.mjs";
 import { scrubPiiText } from "./selltraces-projector.mjs";
+
+let uIOhook = null;
+try {
+  const mod = await import("uiohook-napi");
+  uIOhook = mod.uIOhook || mod.default || mod;
+} catch (e) {
+  // uiohook is optional in test environments or environments without display server
+}
 
 export function slugifyProject(title) {
   if (!title || typeof title !== "string") return "workflow-demo";
@@ -15,6 +26,26 @@ export function slugifyProject(title) {
     .replace(/^-+|-+$/g, "")
     .slice(0, 120);
   return slug || "workflow-demo";
+}
+
+export async function getActiveWindow() {
+  if (process.env.NODE_ENV === "test") {
+    return { title: "Test Window", process: "TEST" };
+  }
+  if (process.platform === "win32") {
+    try {
+      const psCommand = `powershell -NoProfile -Command "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; using System.Text; public class Win { [DllImport(\\\"user32.dll\\\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\\\"user32.dll\\\", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder strText, int maxCount); [DllImport(\\\"user32.dll\\\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid); }'; $hwnd = [Win]::GetForegroundWindow(); $sb = New-Object System.Text.StringBuilder 256; $null = [Win]::GetWindowText($hwnd, $sb, 256); $pidOut = 0; $null = [Win]::GetWindowThreadProcessId($hwnd, [ref]$pidOut); $p = Get-Process -Id $pidOut -ErrorAction SilentlyContinue; @{ title = $sb.ToString(); process = $p.ProcessName } | ConvertTo-Json -Compress"`;
+      const { stdout } = await execAsync(psCommand, { timeout: 800 });
+      if (stdout) {
+        const parsed = JSON.parse(stdout.trim());
+        return {
+          title: parsed.title || "Desktop",
+          process: (parsed.process || "unknown").toUpperCase(),
+        };
+      }
+    } catch {}
+  }
+  return { title: "Desktop Application", process: "DESKTOP" };
 }
 
 export class DemonstrationRecorder {
@@ -104,6 +135,7 @@ export class DemonstrationRecorder {
     // Start screen capture loop & mouse/cursor position tracking
     this._startCaptureLoop();
     this._startMouseTracker();
+    this._startGlobalInputHook();
 
     return {
       started: true,
@@ -131,6 +163,110 @@ export class DemonstrationRecorder {
       clearInterval(this.mouseTimer);
       this.mouseTimer = null;
     }
+  }
+
+  _startGlobalInputHook() {
+    if (!uIOhook || typeof uIOhook.start !== "function") return;
+
+    this.onMouseDown = (e) => {
+      if (!this.activeSession || this.activeSession.isPaused) return;
+      const buttonName = e.button === 1 ? "left" : e.button === 2 ? "right" : "middle";
+      this.recordInputEvent({
+        type: "mouse_click",
+        button: buttonName,
+        x: e.x,
+        y: e.y,
+        clicks: e.clicks || 1,
+      });
+    };
+
+    this.onMouseWheel = (e) => {
+      if (!this.activeSession || this.activeSession.isPaused) return;
+      this.recordInputEvent({
+        type: "mouse_scroll",
+        x: e.x,
+        y: e.y,
+        rotation: e.rotation || 0,
+        amount: e.amount || 0,
+      });
+    };
+
+    this.textBuffer = "";
+    this.textDebounce = null;
+
+    this.onKeyDown = (e) => {
+      if (!this.activeSession || this.activeSession.isPaused) return;
+      // Handle printable character codes directly from keydown (works uniformly across Windows/macOS/Linux)
+      const rawKey = e.keychar ? String.fromCharCode(e.keychar) : null;
+      if (rawKey && rawKey.length === 1 && rawKey.charCodeAt(0) >= 32) {
+        this.textBuffer += rawKey;
+      }
+
+      // Enter key or Tab key finishes the typed text chunk immediately
+      if (e.keycode === 28 || e.keycode === 0x0E || e.keycode === 15) {
+        if (this.textBuffer) {
+          const text = this.textBuffer;
+          this.textBuffer = "";
+          this.recordInputEvent({
+            type: "type_text",
+            text,
+          });
+        }
+      } else {
+        if (this.textDebounce) clearTimeout(this.textDebounce);
+        this.textDebounce = setTimeout(() => {
+          if (this.textBuffer) {
+            const text = this.textBuffer;
+            this.textBuffer = "";
+            this.recordInputEvent({
+              type: "type_text",
+              text,
+            });
+          }
+        }, 500);
+      }
+    };
+
+    this.onKeyTyped = (e) => {
+      if (!this.activeSession || this.activeSession.isPaused) return;
+      const char = String.fromCharCode(e.keychar || e.rawcode || 0);
+      if (char && char.length === 1 && char.charCodeAt(0) >= 32) {
+        this.textBuffer += char;
+        if (this.textDebounce) clearTimeout(this.textDebounce);
+        this.textDebounce = setTimeout(() => {
+          if (this.textBuffer) {
+            const text = this.textBuffer;
+            this.textBuffer = "";
+            this.recordInputEvent({
+              type: "type_text",
+              text,
+            });
+          }
+        }, 500);
+      }
+    };
+
+    try {
+      uIOhook.removeAllListeners?.();
+      uIOhook.on("mousedown", this.onMouseDown);
+      uIOhook.on("wheel", this.onMouseWheel);
+      uIOhook.on("keydown", this.onKeyDown);
+      uIOhook.on("keytyped", this.onKeyTyped);
+      uIOhook.start();
+    } catch (err) {
+      console.warn("[DemonstrationRecorder] uIOhook start warning:", err);
+    }
+  }
+
+  _stopGlobalInputHook() {
+    if (!uIOhook) return;
+    try {
+      if (this.onMouseDown) uIOhook.off("mousedown", this.onMouseDown);
+      if (this.onMouseWheel) uIOhook.off("wheel", this.onMouseWheel);
+      if (this.onKeyDown) uIOhook.off("keydown", this.onKeyDown);
+      if (this.onKeyTyped) uIOhook.off("keytyped", this.onKeyTyped);
+      uIOhook.stop();
+    } catch {}
   }
 
   _startCaptureLoop() {
@@ -177,19 +313,22 @@ export class DemonstrationRecorder {
     const base64Data = buffer.toString("base64");
     const artifactName = `screen-${Date.now()}-${this.activeSession.framesCount + 1}.jpeg`;
 
-    const artifact = this.activeSession.producer.recordArtifact(
+    const artifactHash = this.activeSession.producer.recordArtifact(
       artifactName,
       buffer,
       "image/jpeg",
     );
 
     const cursor = this.activeSession.lastCursorPoint || screen.getCursorScreenPoint?.() || { x: 0, y: 0 };
+    const activeWin = await getActiveWindow();
+
     const event = this.activeSession.producer.emit({
       kind: "screen_observation",
       observedAtUnixNs: String(BigInt(Date.now()) * 1000000n),
       payload: {
-        artifactId: artifact.id,
-        artifactUrl: `http://136.112.93.84:8788/artifacts/${artifact.id}`,
+        artifactId: artifactName,
+        artifactHash,
+        artifactUrl: `http://136.112.93.84:8788/artifacts/${artifactName}`,
         sha256: frameHash,
         width: image.getSize().width,
         height: image.getSize().height,
@@ -197,6 +336,7 @@ export class DemonstrationRecorder {
           x: cursor.x,
           y: cursor.y,
         },
+        activeWindow: activeWin,
         trigger,
         action: action || null,
       },
@@ -207,15 +347,17 @@ export class DemonstrationRecorder {
     return event;
   }
 
-  recordInputEvent(actionData) {
+  async recordInputEvent(actionData) {
     if (!this.activeSession || this.activeSession.isPaused) return;
 
+    const activeWin = await getActiveWindow();
     this.activeSession.inputEventsCount++;
     this.activeSession.producer.emit({
       kind: "human_action",
       observedAtUnixNs: String(BigInt(Date.now()) * 1000000n),
       payload: {
         ...actionData,
+        activeWindow: activeWin,
         timestamp: Date.now(),
       },
     });
@@ -244,80 +386,100 @@ export class DemonstrationRecorder {
 
   async stop() {
     if (!this.activeSession) {
+      if (this.lastCompletedResult) {
+        return this.lastCompletedResult;
+      }
       throw new Error("No active demonstration recording to stop.");
     }
-
-    if (this.captureTimer) {
-      clearInterval(this.captureTimer);
-      this.captureTimer = null;
+    if (this.isStopping) {
+      return this.stoppingPromise;
     }
-    this._stopMouseTracker();
+    this.isStopping = true;
 
-    const session = this.activeSession;
-    const producer = session.producer;
-
-    // Emit session.closed
-    producer.emit({
-      kind: "session.closed",
-      payload: {
-        reason: "completed",
-        total_frames: session.framesCount,
-        total_actions: session.inputEventsCount,
-      },
-    });
-
-    const sealResult = producer.seal({ complete: true });
-    const records = producer.getRecords();
-
-    // Close floating widget
-    if (this.floatingWindow && !this.floatingWindow.isDestroyed()) {
-      this.floatingWindow.close();
-      this.floatingWindow = null;
-    }
-
-    // Restore main window
-    const mainWindow = this.getMainWindow?.();
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      if (typeof mainWindow.isMinimized === "function" && mainWindow.isMinimized()) {
-        mainWindow.restore?.();
+    this.stoppingPromise = (async () => {
+      if (this.captureTimer) {
+        clearInterval(this.captureTimer);
+        this.captureTimer = null;
       }
-      mainWindow.show?.();
-      mainWindow.focus?.();
-    }
+      this._stopMouseTracker();
+      this._stopGlobalInputHook();
 
-    // Post records to collector if connected
-    let transmitted = false;
-    if (this.postCollectorEvents) {
+      // Immediately close floating widget and restore main window so the user is never kept waiting
+      if (this.floatingWindow && !this.floatingWindow.isDestroyed()) {
+        this.floatingWindow.close();
+        this.floatingWindow = null;
+      }
+
+      const mainWindow = this.getMainWindow?.();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (typeof mainWindow.isMinimized === "function" && mainWindow.isMinimized()) {
+          mainWindow.restore?.();
+        }
+        mainWindow.show?.();
+        mainWindow.focus?.();
+      }
+
+      const session = this.activeSession;
+      this.activeSession = null;
+      this.lastFrameHash = null;
+
+      const producer = session.producer;
+      let sealResult = null;
+      let records = [];
+
       try {
-        await this.postCollectorEvents({
-          project: session.projectId,
-          sessionId: session.sessionId,
-          traceId: session.traceId,
-          records,
-          artifacts: sealResult.artifacts,
-        });
-        transmitted = true;
+        if (!producer.isSealed) {
+          producer.emit({
+            kind: "session.closed",
+            payload: {
+              reason: "completed",
+              total_frames: session.framesCount,
+              total_actions: session.inputEventsCount,
+            },
+          });
+          sealResult = producer.seal({ complete: true });
+        }
+        records = producer.getRecords();
       } catch (err) {
-        console.warn("[DemonstrationRecorder] Failed to stream events to Haloop:", err);
+        console.warn("[DemonstrationRecorder] Seal warning:", err);
       }
-    }
 
-    this.activeSession = null;
-    this.lastFrameHash = null;
+      // Post records to collector in the background
+      let transmitted = false;
+      if (this.postCollectorEvents) {
+        try {
+          await this.postCollectorEvents({
+            project: session.projectId,
+            sessionId: session.sessionId,
+            traceId: session.traceId,
+            records,
+            artifacts: sealResult?.artifacts || {},
+          });
+          transmitted = true;
+        } catch (err) {
+          console.warn("[DemonstrationRecorder] Failed to stream events to Haloop:", err);
+        }
+      }
 
-    return {
-      success: true,
-      projectId: session.projectId,
-      taskTitle: session.taskTitle,
-      runId: session.runId,
-      sessionId: session.sessionId,
-      traceId: session.traceId,
-      framesCount: session.framesCount,
-      actionsCount: session.inputEventsCount,
-      transmitted,
-      recordsCount: records.length,
-      receipt: sealResult.receipt,
-    };
+      this.lastCompletedResult = {
+        success: true,
+        projectId: session.projectId,
+        taskTitle: session.taskTitle,
+        runId: session.runId,
+        sessionId: session.sessionId,
+        traceId: session.traceId,
+        framesCount: session.framesCount,
+        actionsCount: session.inputEventsCount,
+        transmitted,
+        recordsCount: records.length,
+        receipt: sealResult?.receipt || null,
+      };
+
+      this.isStopping = false;
+      return this.lastCompletedResult;
+    })();
+
+    return this.stoppingPromise;
   }
 
   async _createFloatingWindow() {
@@ -439,6 +601,8 @@ export class DemonstrationRecorder {
           }
 
           function finish() {
+            let finishBtn = document.querySelector('.finish');
+            if (finishBtn) finishBtn.textContent = 'Saving...';
             const { ipcRenderer } = require('electron');
             ipcRenderer.send('demonstration-widget-action', 'finish');
           }
@@ -449,8 +613,9 @@ export class DemonstrationRecorder {
 
     await this.floatingWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
 
-    // Expose IPCRenderer bridge for floating widget actions
-    this.floatingWindow.webContents.ipc.on("demonstration-widget-action", async (_evt, action) => {
+    // Listen for floating widget actions directly on ipcMain for instant response
+    ipcMain.removeAllListeners("demonstration-widget-action");
+    ipcMain.on("demonstration-widget-action", async (_evt, action) => {
       if (action === "pause") {
         this.pause();
         const mainWindow = this.getMainWindow?.();

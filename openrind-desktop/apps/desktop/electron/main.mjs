@@ -3633,6 +3633,11 @@ async function handleDesktopInvoke(event, command, ...args) {
                 end: Number(BigInt(record.observed_at_unix_ns) / 1000000n) / 1000,
                 ok: true,
                 service_name: "openrind-demonstration-recorder",
+                attributes: {
+                  "llm.model_name": "human-vla-demonstration",
+                  "llm.provider": "desktop-recorder",
+                  "agent.name": "vla-screen-recorder",
+                },
               });
             }
 

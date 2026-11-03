@@ -49,21 +49,27 @@ test("DemonstrationRecorder initializes, seals, and records actions", async () =
   assert.equal(startRes.projectId, "invoice-entry-in-excel-email-dispatch");
 
   // Record an input action
-  recorder.recordInputEvent({
-    type: "click",
+  await recorder.recordInputEvent({
+    type: "mouse_click",
+    button: "left",
     x: 450,
     y: 320,
     target: "Excel Cell B4",
   });
 
-  assert.equal(recorder.activeSession.inputEventsCount, 1);
+  await recorder.recordInputEvent({
+    type: "type_text",
+    text: "Q3 Vendor Invoice",
+  });
+
+  assert.equal(recorder.activeSession.inputEventsCount, 2);
 
   // Stop recording
   const stopRes = await recorder.stop();
 
   assert.equal(stopRes.success, true);
   assert.equal(stopRes.projectId, "invoice-entry-in-excel-email-dispatch");
-  assert.equal(stopRes.actionsCount, 1);
+  assert.equal(stopRes.actionsCount, 2);
   assert.ok(mockCollectorPayload);
   assert.equal(mockCollectorPayload.project, "invoice-entry-in-excel-email-dispatch");
 });

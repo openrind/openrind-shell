@@ -33,7 +33,8 @@
     "test:openshell:e2e": "node --test __tests__/openshell.spec.mjs"
   },
   "dependencies": {
-    "electron-updater": "^6.3.9"
+    "electron-updater": "^6.3.9",
+    "uiohook-napi": "^1.5.5"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",
