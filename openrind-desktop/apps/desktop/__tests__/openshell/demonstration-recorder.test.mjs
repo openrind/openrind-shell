@@ -75,4 +75,9 @@ test("DemonstrationRecorder initializes, seals, and records actions", async () =
   assert.equal(stopRes.actionsCount, 2);
   assert.ok(mockCollectorPayload);
   assert.equal(mockCollectorPayload.project, "invoice-entry-in-excel-email-dispatch");
+
+  const actionRecords = mockCollectorPayload.records.filter((r) => r.kind === "human_action");
+  assert.equal(actionRecords.length, 2);
+  assert.ok("frame_before" in actionRecords[0].payload);
+  assert.ok("frame_after" in actionRecords[0].payload);
 });

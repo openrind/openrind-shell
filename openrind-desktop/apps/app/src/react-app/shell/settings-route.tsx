@@ -34,6 +34,7 @@ import { ExtensionsView } from "../domains/settings/pages/extensions-view";
 import { McpView } from "../domains/settings/pages/mcp-view";
 import { SandboxView } from "../domains/settings/pages/sandbox-view";
 import { SkillsView } from "../domains/settings/pages/skills-view";
+import { HaloopAnalyticsView } from "../domains/settings/pages/haloop-analytics-view";
 import { CtfTaskSidebar, type CtfTask } from "../domains/ctf/ctf-task-sidebar";
 import { useOpenShellState } from "../domains/settings/state/openshell-state";
 import { useDebugViewModel } from "../domains/settings/state/debug-view-model";
@@ -238,8 +239,8 @@ function parseSettingsPath(pathname: string): {
   }
 
   const [head, tail] = trimmed.split("/");
-  if (head === "haloop" || head === "billing") {
-    return { tab: "sandbox", redirectPath: "/settings/sandbox" };
+  if (head === "billing") {
+    return { tab: "haloop", redirectPath: "/settings/haloop" };
   }
   switch (head) {
     case "general":
@@ -248,6 +249,7 @@ function parseSettingsPath(pathname: string): {
     case "appearance":
     case "environment":
     case "sandbox":
+    case "haloop":
     case "debug":
       return { tab: head, redirectPath: null };
     case "extensions":
@@ -286,7 +288,7 @@ export function SettingsRoute() {
   const route = parseSettingsPath(location.pathname);
   const openshellState = useOpenShellState({
     active: route.tab === "sandbox",
-    haloopActive: false,
+    haloopActive: route.tab === "haloop",
   });
 
   const [loading, setLoading] = useState(true);
@@ -1217,6 +1219,17 @@ export function SettingsRoute() {
         );
       case "debug":
         return <DebugView {...debugViewProps} />;
+      case "haloop":
+        return (
+          <HaloopAnalyticsView
+            collectorUrl={
+              (typeof process !== "undefined" && process.env.HALOOP_COLLECTOR_URL) ||
+              "http://136.112.93.84:8788"
+            }
+            status={openshellState.haloopStatus}
+            onRefreshRuntime={openshellState.refreshHaloopStatus}
+          />
+        );
       default:
         return null;
     }

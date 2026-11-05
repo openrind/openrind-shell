@@ -22,6 +22,8 @@ export function getSettingsTabLabel(tab: SettingsTab) {
       return t("settings.tab_appearance");
     case "sandbox":
       return t("settings.tab_sandbox");
+    case "haloop":
+      return "Observability & Haloop";
     case "debug":
       return t("settings.tab_debug");
     default:
@@ -43,6 +45,8 @@ export function getSettingsTabDescription(tab: SettingsTab) {
       return t("settings.tab_description_appearance");
     case "sandbox":
       return t("settings.tab_description_sandbox");
+    case "haloop":
+      return "Trace analytics, live model metrics, session warnings, and artifact previews.";
     case "debug":
       return t("settings.tab_description_debug");
     default:
@@ -55,7 +59,7 @@ export function getWorkspaceSettingsTabs(): SettingsTab[] {
 }
 
 export function getGlobalSettingsTabs(developerMode: boolean): SettingsTab[] {
-  const tabs: SettingsTab[] = ["sandbox", "appearance", "environment"];
+  const tabs: SettingsTab[] = ["sandbox", "appearance", "environment", "haloop"];
   if (developerMode) tabs.push("debug");
   return tabs;
 }
