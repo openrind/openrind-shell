@@ -259,11 +259,12 @@ export class DemonstrationRecorder {
   }
 
   _startMouseTracker() {
+    if (isTestEnv()) return;
     this.mouseTimer = setInterval(() => {
       if (!this.activeSession || this.activeSession.isPaused) return;
       try {
-        const point = screen.getCursorScreenPoint();
-        if (!this.lastPoint || Math.abs(point.x - this.lastPoint.x) > 40 || Math.abs(point.y - this.lastPoint.y) > 40) {
+        const point = screen?.getCursorScreenPoint?.();
+        if (point && (!this.lastPoint || Math.abs(point.x - this.lastPoint.x) > 40 || Math.abs(point.y - this.lastPoint.y) > 40)) {
           this.lastPoint = point;
           this.activeSession.lastCursorPoint = point;
         }
@@ -481,7 +482,12 @@ export class DemonstrationRecorder {
       console.warn("[DemonstrationRecorder] Failed to stream frame artifact:", err?.message || err);
     });
 
-    const cursor = this.activeSession.lastCursorPoint || screen.getCursorScreenPoint?.() || { x: 0, y: 0 };
+    let cursor = { x: 0, y: 0 };
+    if (!isTestEnv()) {
+      try {
+        cursor = this.activeSession.lastCursorPoint || screen?.getCursorScreenPoint?.() || { x: 0, y: 0 };
+      } catch {}
+    }
     const activeWin = await getActiveWindow();
 
     const baseArtifactUrl = targetArtifactsUrl.replace(/\/+$/, "");
@@ -700,11 +706,16 @@ export class DemonstrationRecorder {
   }
 
   async _createFloatingWindow() {
+    if (isTestEnv()) return;
     if (this.floatingWindow && !this.floatingWindow.isDestroyed()) {
       return;
     }
 
-    const primaryDisplay = screen.getPrimaryDisplay();
+    let primaryDisplay = null;
+    try {
+      primaryDisplay = screen?.getPrimaryDisplay?.();
+    } catch {}
+    if (!primaryDisplay?.workAreaSize) return;
     const { width, height } = primaryDisplay.workAreaSize;
 
     // Small pill in bottom-right corner
@@ -876,7 +887,7 @@ export class DemonstrationRecorder {
   }
 
   _updateFloatingState() {
-    if (!this.floatingWindow || this.floatingWindow.isDestroyed() || !this.activeSession) return;
+    if (isTestEnv() || !this.floatingWindow || this.floatingWindow.isDestroyed() || !this.activeSession) return;
     const frames = this.activeSession.framesCount;
     this.floatingWindow.webContents.executeJavaScript(`
       if (document.getElementById('frames')) {

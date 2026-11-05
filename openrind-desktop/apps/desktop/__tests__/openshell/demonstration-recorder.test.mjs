@@ -38,9 +38,10 @@ test("DemonstrationRecorder initializes, seals, and records actions", async () =
     },
   });
 
-  // Mock internal window creation and snapshot capture for headless Node test
+  // Mock internal window creation, mouse tracker, and snapshot capture for headless Node test
   recorder._createFloatingWindow = async () => {};
   recorder._updateFloatingState = () => {};
+  recorder._startMouseTracker = () => {};
   recorder.captureSnapshot = async () => null;
 
   const startRes = await recorder.start({
