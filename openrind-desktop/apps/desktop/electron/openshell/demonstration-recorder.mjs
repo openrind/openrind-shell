@@ -533,13 +533,14 @@ export class DemonstrationRecorder {
     let frameAfter = null;
     try {
       const snapEvent = await this.captureSnapshot({ trigger: "action", action: actionData });
-      if (snapEvent?.payload) {
+      const snapPayload = /** @type {any} */ (snapEvent?.payload);
+      if (snapPayload) {
         frameAfter = {
-          artifactId: snapEvent.payload.artifactId,
-          artifactUrl: snapEvent.payload.artifactUrl,
-          sha256: snapEvent.payload.sha256,
-          width: snapEvent.payload.width,
-          height: snapEvent.payload.height,
+          artifactId: snapPayload.artifactId,
+          artifactUrl: snapPayload.artifactUrl,
+          sha256: snapPayload.sha256,
+          width: snapPayload.width,
+          height: snapPayload.height,
         };
       }
     } catch (err) {

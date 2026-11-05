@@ -177,6 +177,7 @@ export type SettingsTab =
   | "advanced"
   | "appearance"
   | "sandbox"
+  | "observability"
   | "haloop"
   | "billing"
   | "debug";

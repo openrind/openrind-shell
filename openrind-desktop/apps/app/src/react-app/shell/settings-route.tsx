@@ -239,8 +239,8 @@ function parseSettingsPath(pathname: string): {
   }
 
   const [head, tail] = trimmed.split("/");
-  if (head === "billing") {
-    return { tab: "haloop", redirectPath: "/settings/haloop" };
+  if (head === "haloop" || head === "billing") {
+    return { tab: "observability", redirectPath: "/settings/observability" };
   }
   switch (head) {
     case "general":
@@ -249,7 +249,7 @@ function parseSettingsPath(pathname: string): {
     case "appearance":
     case "environment":
     case "sandbox":
-    case "haloop":
+    case "observability":
     case "debug":
       return { tab: head, redirectPath: null };
     case "extensions":
@@ -288,7 +288,7 @@ export function SettingsRoute() {
   const route = parseSettingsPath(location.pathname);
   const openshellState = useOpenShellState({
     active: route.tab === "sandbox",
-    haloopActive: route.tab === "haloop",
+    haloopActive: route.tab === "observability",
   });
 
   const [loading, setLoading] = useState(true);
@@ -1219,7 +1219,7 @@ export function SettingsRoute() {
         );
       case "debug":
         return <DebugView {...debugViewProps} />;
-      case "haloop":
+      case "observability":
         return (
           <HaloopAnalyticsView
             collectorUrl={
