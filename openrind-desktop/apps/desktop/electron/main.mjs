@@ -3609,6 +3609,18 @@ async function handleDesktopInvoke(event, command, ...args) {
         openrindHaloopIntegrationMaintenance = false;
       }
     }
+    case "openrindFetchCollector": {
+      const endpointPath = String(args[0] || "/stats");
+      const targetBase = (process.env.HALOOP_COLLECTOR_URL?.trim() || "http://136.112.93.84:8788").replace(/\/+$/, "");
+      const fullUrl = `${targetBase}${endpointPath.startsWith("/") ? "" : "/"}${endpointPath}`;
+      try {
+        const res = await fetch(fullUrl, { signal: AbortSignal.timeout(5000) });
+        if (!res.ok) throw new Error(`Collector ${endpointPath} returned HTTP ${res.status}`);
+        return await res.json();
+      } catch (err) {
+        throw new Error(err instanceof Error ? err.message : String(err));
+      }
+    }
     case "demonstrationStart": {
       const opts = args[0] || {};
       if (!demonstrationRecorder) {

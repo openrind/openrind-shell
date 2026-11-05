@@ -247,6 +247,9 @@ export class DemonstrationRecorder {
     this._startGlobalInputHook();
     startWindowPolling();
 
+    // Baseline initial snapshot frame
+    void this.captureSnapshot({ trigger: "initial" });
+
     return {
       started: true,
       projectId,
@@ -256,11 +259,12 @@ export class DemonstrationRecorder {
   }
 
   _startMouseTracker() {
+    if (isTestEnv()) return;
     this.mouseTimer = setInterval(() => {
       if (!this.activeSession || this.activeSession.isPaused) return;
       try {
-        const point = screen.getCursorScreenPoint();
-        if (!this.lastPoint || Math.abs(point.x - this.lastPoint.x) > 40 || Math.abs(point.y - this.lastPoint.y) > 40) {
+        const point = screen?.getCursorScreenPoint?.();
+        if (point && (!this.lastPoint || Math.abs(point.x - this.lastPoint.x) > 40 || Math.abs(point.y - this.lastPoint.y) > 40)) {
           this.lastPoint = point;
           this.activeSession.lastCursorPoint = point;
         }
@@ -463,29 +467,60 @@ export class DemonstrationRecorder {
       "image/jpeg",
     );
 
-    const cursor = this.activeSession.lastCursorPoint || screen.getCursorScreenPoint?.() || { x: 0, y: 0 };
+    // Stream image frame artifact immediately to collector in the background so it's viewable instantly via HTTP
+    const targetArtifactsUrl = process.env.HALOOP_ARTIFACTS_URL?.trim() || "http://136.112.93.84:8788/artifacts";
+    fetch(targetArtifactsUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        artifact_id: artifactName,
+        sha256: frameHash,
+        content: base64Data,
+        content_type: "image/jpeg",
+      }),
+    }).catch((err) => {
+      console.warn("[DemonstrationRecorder] Failed to stream frame artifact:", err?.message || err);
+    });
+
+    let cursor = { x: 0, y: 0 };
+    if (!isTestEnv()) {
+      try {
+        cursor = this.activeSession.lastCursorPoint || screen?.getCursorScreenPoint?.() || { x: 0, y: 0 };
+      } catch {}
+    }
     const activeWin = await getActiveWindow();
+
+    const baseArtifactUrl = targetArtifactsUrl.replace(/\/+$/, "");
+    const framePayload = {
+      artifactId: artifactName,
+      artifactHash,
+      artifactUrl: `${baseArtifactUrl}/${artifactName}`,
+      sha256: frameHash,
+      width: image.getSize().width,
+      height: image.getSize().height,
+      cursor: {
+        x: cursor.x,
+        y: cursor.y,
+      },
+      activeWindow: activeWin,
+      trigger,
+      action: action || null,
+    };
 
     const event = this.activeSession.producer.emit({
       kind: "screen_observation",
       observedAtUnixNs: String(BigInt(Date.now()) * 1000000n),
-      payload: {
-        artifactId: artifactName,
-        artifactHash,
-        artifactUrl: `http://136.112.93.84:8788/artifacts/${artifactName}`,
-        sha256: frameHash,
-        width: image.getSize().width,
-        height: image.getSize().height,
-        cursor: {
-          x: cursor.x,
-          y: cursor.y,
-        },
-        activeWindow: activeWin,
-        trigger,
-        action: action || null,
-      },
+      payload: framePayload,
     });
 
+    this.activeSession.lastFrame = {
+      artifactId: artifactName,
+      artifactUrl: `${baseArtifactUrl}/${artifactName}`,
+      sha256: frameHash,
+      width: image.getSize().width,
+      height: image.getSize().height,
+      timestamp: Date.now(),
+    };
 
     this.activeSession.framesCount++;
     this._updateFloatingState();
@@ -496,20 +531,46 @@ export class DemonstrationRecorder {
     if (!this.activeSession || this.activeSession.isPaused) return;
 
     const activeWin = await getActiveWindow();
+    const frameBefore = this.activeSession.lastFrame || null;
+
     this.activeSession.inputEventsCount++;
-    this.activeSession.producer.emit({
+
+    // Strict action-to-observation pairing: capture immediate post-action frame
+    let frameAfter = null;
+    try {
+      const snapEvent = await this.captureSnapshot({ trigger: "action", action: actionData });
+      const snapPayload = /** @type {any} */ (snapEvent?.payload);
+      if (snapPayload) {
+        frameAfter = {
+          artifactId: snapPayload.artifactId,
+          artifactUrl: snapPayload.artifactUrl,
+          sha256: snapPayload.sha256,
+          width: snapPayload.width,
+          height: snapPayload.height,
+        };
+      }
+    } catch (err) {
+      console.warn("[DemonstrationRecorder] Frame after action capture failed:", err);
+    }
+
+    if (!frameAfter && this.activeSession.lastFrame) {
+      frameAfter = this.activeSession.lastFrame;
+    }
+
+    const event = this.activeSession.producer.emit({
       kind: "human_action",
       observedAtUnixNs: String(BigInt(Date.now()) * 1000000n),
       payload: {
         ...actionData,
         activeWindow: activeWin,
         timestamp: Date.now(),
+        frame_before: frameBefore,
+        frame_after: frameAfter,
       },
     });
 
-    // Capture an immediate frame on key human actions (click / submit)
-    void this.captureSnapshot({ trigger: "action", action: actionData });
     this._updateFloatingState();
+    return event;
   }
 
   pause() {
@@ -645,11 +706,16 @@ export class DemonstrationRecorder {
   }
 
   async _createFloatingWindow() {
+    if (isTestEnv()) return;
     if (this.floatingWindow && !this.floatingWindow.isDestroyed()) {
       return;
     }
 
-    const primaryDisplay = screen.getPrimaryDisplay();
+    let primaryDisplay = null;
+    try {
+      primaryDisplay = screen?.getPrimaryDisplay?.();
+    } catch {}
+    if (!primaryDisplay?.workAreaSize) return;
     const { width, height } = primaryDisplay.workAreaSize;
 
     // Small pill in bottom-right corner
@@ -821,7 +887,7 @@ export class DemonstrationRecorder {
   }
 
   _updateFloatingState() {
-    if (!this.floatingWindow || this.floatingWindow.isDestroyed() || !this.activeSession) return;
+    if (isTestEnv() || !this.floatingWindow || this.floatingWindow.isDestroyed() || !this.activeSession) return;
     const frames = this.activeSession.framesCount;
     this.floatingWindow.webContents.executeJavaScript(`
       if (document.getElementById('frames')) {
