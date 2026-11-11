@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [nemo, browser-pods, feature/codex, feat/screen-capture]
+    branches: [nemo, browser-pods, feature/codex, feat/screen-capture, audit/kimi]
   push:
-    branches: [nemo, browser-pods, feature/codex, feat/screen-capture]
+    branches: [nemo, browser-pods, feature/codex, feat/screen-capture, audit/kimi]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
