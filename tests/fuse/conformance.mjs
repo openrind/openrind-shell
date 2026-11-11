@@ -114,6 +114,22 @@ try {
     assert.equal(readFileSync(path, 'utf8'), 'abc');
   });
 
+  check('O_TRUNC on existing file truncates to zero immediately', () => {
+    const path = `${root}/open-trunc`;
+    writeFileSync(path, 'initial-content-before-trunc', { mode: 0o600 });
+    assert.equal(statSync(path).size, 'initial-content-before-trunc'.length);
+    const fd = openSync(path, constants.O_WRONLY | constants.O_TRUNC);
+    try {
+      assert.equal(statSync(path).size, 0);
+      writeSync(fd, Buffer.from('fresh'));
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    assert.equal(readFileSync(path, 'utf8'), 'fresh');
+    assert.equal(statSync(path).size, 5);
+  });
+
   check('rename replacement flushes a dirty source and preserves its inode', () => {
     const source = `${root}/rename-source`;
     const destination = `${root}/rename-destination`;

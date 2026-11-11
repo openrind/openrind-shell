@@ -1409,6 +1409,8 @@ export function createCtfService() {
 
       const saveTraces = async (wasSolved, flag, wasStopped = false) => {
         const finishedAt = new Date().toISOString();
+        const submitStep = steps.find(s => s.tool === "submit" || (s.action && s.action.flag));
+        const submittedAtTime = submitStep?.at || finishedAt;
         const trajectory = {
           format: "openrind-ctf-trajectory/v1",
           runId,
@@ -1427,7 +1429,7 @@ export function createCtfService() {
           stopped: wasStopped,
           judge: {
             accepted: wasSolved,
-            submittedAt: finishedAt,
+            submittedAt: submittedAtTime,
             submission: flag,
             verifiedBy: "challenge-server.mjs",
           },
