@@ -557,11 +557,16 @@ export class DemonstrationRecorder {
       frameAfter = this.activeSession.lastFrame;
     }
 
+    const scrubbedAction = { ...actionData };
+    if (this.activeSession.scrubPii && typeof scrubbedAction.text === "string") {
+      scrubbedAction.text = scrubPiiText(scrubbedAction.text);
+    }
+
     const event = this.activeSession.producer.emit({
       kind: "human_action",
       observedAtUnixNs: String(BigInt(Date.now()) * 1000000n),
       payload: {
-        ...actionData,
+        ...scrubbedAction,
         activeWindow: activeWin,
         timestamp: Date.now(),
         frame_before: frameBefore,

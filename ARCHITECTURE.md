@@ -239,6 +239,21 @@ capture paths based on the execution context:
 - **Storage:** Traces are written directly to local files (`trajectory.json`, `events.jsonl`, `challenge-events.jsonl`) inside a local `ctf-traces/` folder within the selected tasks workspace directory (e.g., `<tasks-dir>/ctf-traces/`).
 - **Browser Artifacts:** Any browser screenshots or DOM snapshot artifacts for CTF tasks are captured and persisted locally into `ctf-traces/` by `packages/ctf-runtime/src/agent.mjs`. Modifications to `w8-haloop` do not affect the CTF agent, and CTF local file requirements do not dictate FUSE or gateway architecture.
 
+### 3. OS-Level Desktop Demonstration Recorder (`demonstration-recorder.mjs`)
+- **Engine:** Native host demonstration capture using Electron's `desktopCapturer` and `uiohook-napi` for global input tracking (mouse clicks, scroll events, text keystrokes).
+- **Strict Action-to-Observation Pairing:** Every human action event (`human_action`) is bound to both `frame_before` (visual screen state immediately prior to user input) and `frame_after` (post-action screen capture).
+- **Artifact Streaming:** Screen frames are asynchronously streamed to the collector (`POST /artifacts`) with SHA-256 deduplication and accessible over HTTP at `/artifacts/{id}`.
+
+### 4. Desktop Observability & Analytics Dashboard (`haloop-analytics-view.tsx`)
+- **Location:** Accessible in Openrind Desktop under **Settings -> Observability**.
+- **Dynamic Discovery:** Discovers and lists all project workspaces from `GET /projects` with an in-app searchable dropdown.
+- **Real-Time Telemetry & Charts:**
+  - **Latency Progression (ms):** Turn-by-turn model execution latency graph with average latency indicator.
+  - **Context Token Progression:** Stacked area chart showing prompt context accumulation alongside completion output per turn.
+  - **4 KPI Metrics:** Hands-off median duration (autonomous stretch length), intervention density (prompts per 50 tool calls), API-equivalent spend (computed from retail token rates), and context compactions.
+  - **Session Warning Strip:** Real-time counters for admitted mistakes (*"my mistake"*, *"you're right"*) and tool execution failures.
+  - **Interactive Trajectory Table:** Displays real session IDs, prompt text, latency, token counts, normalized stop reasons (`done`, `token_limit`, `timeout`), and a **"View Frame"** modal previewing captured desktop screenshots directly from the collector.
+
 ## Experimental Browser Pods
 
 This is a separate browser runtime, not a new persistence path. Kernel and

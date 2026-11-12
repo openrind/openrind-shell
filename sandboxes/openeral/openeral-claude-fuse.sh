@@ -80,14 +80,18 @@ When asked to visit, search, browse, or interact with any website or URL (such a
 Always use the Chromium browser tools via \`agent-browser\`:
 1. Open a page:
    \`agent-browser --session web open "<url>"\`  (or \`browser_start "<url>"\`)
-2. Read the interactive page elements:
-   \`agent-browser --session web snapshot -i\`  (or \`browser_snapshot\`)
+2. Read prices, text content, and headings directly:
+   \`agent-browser --session web eval "document.body.innerText"\`
+   (or \`agent-browser --session web snapshot\` to include non-interactive text and prices)
+   To find clickable buttons or links, run: \`agent-browser --session web snapshot -i\`
 3. Click an element:
    \`agent-browser --session web click <ref>\`   (or \`browser_click <ref>\`)
 4. Fill an input:
    \`agent-browser --session web fill <ref> "<text>"\`  (or \`browser_fill <ref> "<text>"\`)
 5. When finished, ALWAYS close the browser:
    \`agent-browser --session web close\`        (or \`browser_close\`)
+
+NOTE: You do NOT need graphical vision or screenshots to read prices or content; \`document.body.innerText\` extracts all webpage text, prices, and product details directly.
 
 NEVER use curl, wget, or Fetch for shopping/interactive websites. Always use the browser tools above.
 EOF

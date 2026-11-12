@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { resolve } from 'node:path';
 import { deriveProjectRoots, slugifyClaudeProjectPath } from './resolve.js';
 
 describe('memory project resolution', () => {
@@ -13,8 +14,8 @@ describe('memory project resolution', () => {
       gitCommonDir: '/home/sss/Code/pgmount/.git',
     });
 
-    expect(roots.contentRoot).toBe('/home/sss/Code/pgmount/.worktrees/just-bash');
-    expect(roots.memoryKeyRoot).toBe('/home/sss/Code/pgmount');
+    expect(roots.contentRoot).toBe(resolve('/home/sss/Code/pgmount/.worktrees/just-bash'));
+    expect(roots.memoryKeyRoot).toBe(resolve('/home/sss/Code/pgmount'));
   });
 
   it('uses the explicit project root for scanning when provided', () => {
@@ -25,13 +26,13 @@ describe('memory project resolution', () => {
       gitCommonDir: '/tmp/project/.git',
     });
 
-    expect(roots.contentRoot).toBe('/tmp/project');
-    expect(roots.memoryKeyRoot).toBe('/tmp/project');
+    expect(roots.contentRoot).toBe(resolve('/tmp/project'));
+    expect(roots.memoryKeyRoot).toBe(resolve('/tmp/project'));
   });
 
   it('falls back to cwd outside git', () => {
     const roots = deriveProjectRoots({ cwd: '/tmp/plain-dir' });
-    expect(roots.contentRoot).toBe('/tmp/plain-dir');
-    expect(roots.memoryKeyRoot).toBe('/tmp/plain-dir');
+    expect(roots.contentRoot).toBe(resolve('/tmp/plain-dir'));
+    expect(roots.memoryKeyRoot).toBe(resolve('/tmp/plain-dir'));
   });
 });

@@ -26,7 +26,7 @@ function normalizeGitPath(baseDir: string, value?: string): string | undefined {
 }
 
 export function slugifyClaudeProjectPath(projectPath: string): string {
-  const normalized = resolve(projectPath).replace(/\\/g, '/');
+  const normalized = resolve(projectPath).replace(/^[a-zA-Z]:/, '').replace(/\\/g, '/');
   return normalized.replace(/\//g, '-') || 'project';
 }
 

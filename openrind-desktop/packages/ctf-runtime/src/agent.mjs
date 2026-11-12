@@ -385,7 +385,7 @@ Task: ${task.title}\n${task.description}` }, { role: 'user', content: 'Solve the
         }
         const step = { number: index + 1, at: new Date().toISOString(), thought: action.thought, tool: action.tool,
           action: action.tool === 'browser' ? { action: action.action, selector: action.selector, value: action.value } : { flag: flagToSubmit },
-          observation: clean(observation, MAX_OBSERVATION_CHARS), rawObservation: clean(rawObservation, MAX_OBSERVATION_CHARS),
+          observation: clean(observation, MAX_OBSERVATION_CHARS), rawObservation: String(rawObservation ?? ''),
           ...(screenshotArtifact ? { screenshot: screenshotArtifact } : {}),
           durationMs: performance.now() - started };
         trajectory.steps.push(step);

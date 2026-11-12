@@ -173,14 +173,18 @@ When asked to visit, search, browse, or interact with any website or URL:
 Execute the bash terminal commands using `agent-browser`:
 1. Open a website in the browser:
    Run in terminal: `agent-browser --session web open "<url>"`
-2. Read the interactive page elements:
-   Run in terminal: `agent-browser --session web snapshot -i`
+2. Read prices, text content, and headings directly:
+   Run in terminal: `agent-browser --session web eval "document.body.innerText"`
+   (or `agent-browser --session web snapshot` to include non-interactive text and prices)
+   To find clickable buttons or links, run: `agent-browser --session web snapshot -i`
 3. Click an interactive element:
    Run in terminal: `agent-browser --session web click <ref>`
 4. Fill an input field:
    Run in terminal: `agent-browser --session web fill <ref> "<text>"`
 5. Always close the browser when finished:
    Run in terminal: `agent-browser --session web close`
+
+NOTE: You do NOT need graphical vision or screenshots to read prices or content; `document.body.innerText` extracts all webpage text, prices, and product details directly.
 
 DO NOT output pseudo-tool tags like <|message_model|>. ALWAYS execute real tool calls or bash commands in the terminal using the command execution tool.
 EOF
