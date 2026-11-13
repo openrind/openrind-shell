@@ -436,16 +436,35 @@ export class DemonstrationRecorder {
   async captureSnapshot({ trigger = "manual", action = null } = {}) {
     if (!this.activeSession || isTestEnv() || !desktopCapturer?.getSources) return null;
 
+    let cursor = { x: 0, y: 0 };
+    let currentDisplay = null;
+    if (!isTestEnv()) {
+      try {
+        cursor = this.activeSession.lastCursorPoint || screen?.getCursorScreenPoint?.() || { x: 0, y: 0 };
+        currentDisplay = screen?.getDisplayNearestPoint?.(cursor) || screen?.getPrimaryDisplay?.();
+      } catch {}
+    }
+
+    const targetWidth = currentDisplay?.bounds?.width || 1920;
+    const targetHeight = currentDisplay?.bounds?.height || 1080;
+
     const sources = await desktopCapturer.getSources({
       types: ["screen"],
-      thumbnailSize: { width: 1920, height: 1080 },
+      thumbnailSize: { width: targetWidth, height: targetHeight },
       fetchWindowIcons: false,
     });
 
     if (!sources || sources.length === 0) return null;
 
-    const primaryScreenSource = sources[0];
-    const image = primaryScreenSource.thumbnail;
+    // Multi-monitor: select the screen source matching the display where the cursor/window is
+    let targetSource = sources[0];
+    if (currentDisplay && sources.length > 1) {
+      const displayIdStr = String(currentDisplay.id);
+      const matched = sources.find((s) => s.display_id === displayIdStr || s.id.includes(displayIdStr));
+      if (matched) targetSource = matched;
+    }
+
+    const image = targetSource.thumbnail;
     if (!image || image.isEmpty()) return null;
 
     // Convert to WebP or JPEG buffer
@@ -482,14 +501,12 @@ export class DemonstrationRecorder {
       console.warn("[DemonstrationRecorder] Failed to stream frame artifact:", err?.message || err);
     });
 
-    let cursor = { x: 0, y: 0 };
-    if (!isTestEnv()) {
-      try {
-        cursor = this.activeSession.lastCursorPoint || screen?.getCursorScreenPoint?.() || { x: 0, y: 0 };
-      } catch {}
+    let activeWin = await getActiveWindow();
+    if (this.activeSession.scrubPii && activeWin?.title) {
+      activeWin = { ...activeWin, title: scrubPiiText(activeWin.title) };
     }
-    const activeWin = await getActiveWindow();
 
+    const displayBounds = currentDisplay?.bounds || { x: 0, y: 0, width: targetWidth, height: targetHeight };
     const baseArtifactUrl = targetArtifactsUrl.replace(/\/+$/, "");
     const framePayload = {
       artifactId: artifactName,
@@ -498,9 +515,16 @@ export class DemonstrationRecorder {
       sha256: frameHash,
       width: image.getSize().width,
       height: image.getSize().height,
+      display: {
+        id: currentDisplay?.id ?? "primary",
+        bounds: displayBounds,
+        scaleFactor: currentDisplay?.scaleFactor || 1,
+      },
       cursor: {
         x: cursor.x,
         y: cursor.y,
+        relativeX: Math.max(0, Math.min(displayBounds.width, cursor.x - displayBounds.x)),
+        relativeY: Math.max(0, Math.min(displayBounds.height, cursor.y - displayBounds.y)),
       },
       activeWindow: activeWin,
       trigger,
@@ -530,15 +554,29 @@ export class DemonstrationRecorder {
   async recordInputEvent(actionData) {
     if (!this.activeSession || this.activeSession.isPaused) return;
 
-    const activeWin = await getActiveWindow();
+    let activeWin = await getActiveWindow();
+    if (this.activeSession.scrubPii && activeWin?.title) {
+      activeWin = { ...activeWin, title: scrubPiiText(activeWin.title) };
+    }
     const frameBefore = this.activeSession.lastFrame || null;
 
     this.activeSession.inputEventsCount++;
 
-    // Strict action-to-observation pairing: capture immediate post-action frame
+    // 1. Scrub PII on input actions immediately before capture or emission
+    const scrubbedAction = { ...actionData };
+    if (this.activeSession.scrubPii && typeof scrubbedAction.text === "string") {
+      scrubbedAction.text = scrubPiiText(scrubbedAction.text);
+    }
+
+    // 2. Add settling delay (~100ms) so OS/GPU finishes repainting active window
+    if (!isTestEnv()) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    // 3. Strict action-to-observation pairing: capture settled post-action frame
     let frameAfter = null;
     try {
-      const snapEvent = await this.captureSnapshot({ trigger: "action", action: actionData });
+      const snapEvent = await this.captureSnapshot({ trigger: "action", action: scrubbedAction });
       const snapPayload = /** @type {any} */ (snapEvent?.payload);
       if (snapPayload) {
         frameAfter = {
@@ -547,6 +585,7 @@ export class DemonstrationRecorder {
           sha256: snapPayload.sha256,
           width: snapPayload.width,
           height: snapPayload.height,
+          timestamp: Date.now(),
         };
       }
     } catch (err) {
@@ -555,11 +594,6 @@ export class DemonstrationRecorder {
 
     if (!frameAfter && this.activeSession.lastFrame) {
       frameAfter = this.activeSession.lastFrame;
-    }
-
-    const scrubbedAction = { ...actionData };
-    if (this.activeSession.scrubPii && typeof scrubbedAction.text === "string") {
-      scrubbedAction.text = scrubPiiText(scrubbedAction.text);
     }
 
     const event = this.activeSession.producer.emit({
@@ -616,6 +650,35 @@ export class DemonstrationRecorder {
       this._stopGlobalInputHook();
       stopWindowPolling();
 
+      const session = this.activeSession;
+      this.activeSession = null;
+      this.lastFrameHash = null;
+
+      const producer = session.producer;
+      let sealResult = null;
+      let records = [];
+
+      try {
+        records = producer.getRecords();
+        const finalActionCount = records.filter((r) => r.kind === "human_action").length;
+        if (!producer.isSealed) {
+          producer.emit({
+            kind: "session.closed",
+            payload: {
+              reason: "completed",
+              total_frames: session.framesCount,
+              total_actions: finalActionCount,
+            },
+          });
+          sealResult = producer.seal({ complete: true });
+        }
+        records = producer.getRecords();
+      } catch (err) {
+        console.warn("[DemonstrationRecorder] Seal warning:", err);
+      }
+
+      const finalActionCount = records.filter((r) => r.kind === "human_action").length;
+
       // Immediately notify the main window UI that recording has ended
       const mainWindow = this.getMainWindow?.();
       try {
@@ -624,10 +687,10 @@ export class DemonstrationRecorder {
           session: null,
           result: {
             success: true,
-            projectId: this.activeSession?.projectId || "demonstration",
-            taskTitle: this.activeSession?.taskTitle || "Task",
-            framesCount: this.activeSession?.framesCount || 0,
-            actionsCount: this.activeSession?.inputEventsCount || 0,
+            projectId: session.projectId || "demonstration",
+            taskTitle: session.taskTitle || "Task",
+            framesCount: session.framesCount || 0,
+            actionsCount: finalActionCount,
             transmitted: true,
           },
         });
@@ -645,31 +708,6 @@ export class DemonstrationRecorder {
         }
         mainWindow.show?.();
         mainWindow.focus?.();
-      }
-
-      const session = this.activeSession;
-      this.activeSession = null;
-      this.lastFrameHash = null;
-
-      const producer = session.producer;
-      let sealResult = null;
-      let records = [];
-
-      try {
-        if (!producer.isSealed) {
-          producer.emit({
-            kind: "session.closed",
-            payload: {
-              reason: "completed",
-              total_frames: session.framesCount,
-              total_actions: session.inputEventsCount,
-            },
-          });
-          sealResult = producer.seal({ complete: true });
-        }
-        records = producer.getRecords();
-      } catch (err) {
-        console.warn("[DemonstrationRecorder] Seal warning:", err);
       }
 
       // Post records to collector in the background
@@ -697,7 +735,7 @@ export class DemonstrationRecorder {
         sessionId: session.sessionId,
         traceId: session.traceId,
         framesCount: session.framesCount,
-        actionsCount: session.inputEventsCount,
+        actionsCount: finalActionCount,
         transmitted,
         recordsCount: records.length,
         receipt: sealResult?.receipt || null,
