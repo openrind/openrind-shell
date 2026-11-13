@@ -16,6 +16,8 @@ Choose one path. They have different prerequisites and test coverage.
 
 | Your task | Start here | Current limit |
 |---|---|---|
+| Record OS-level human demonstrations | [Record Desktop Workflows](#record-desktop-workflows) | Captures multi-monitor screen frames, cursor, and PII-scrubbed actions |
+| View live analytics & trace metrics | [Inspect Observability Dashboard](#observability-and-analytics) | Real-time latency, token progression, retail pricing, and frame previews |
 | Use Claude with persistent project files | [Start Claude In Desktop](#start-claude-in-desktop) | The managed OpenShell installer targets Windows 11 and WSL2 |
 | Try real browser automation without keys | [Try The Browser Runtime](#try-the-browser-runtime) | Linux x64 test; no Desktop, model, database, or vendor account needed |
 | Develop or evaluate browser CTF tasks | [Run Browser CTF Tasks](#run-browser-ctf-tasks) | Linux x64 and local Docker; a model run also needs an OpenRouter key |
@@ -81,6 +83,24 @@ A model run is successful only when its trajectory and the separate challenge
 judge both show an accepted flag. The fixture never inserts a known flag or
 claims a model action that the browser tool did not run. Model quality can cause
 a valid runtime test to end with an unaccepted flag.
+
+## Record Desktop Workflows
+
+Capture OS-level human task demonstrations for Vision-Language-Action (VLA) models:
+- **Global Input Hooks:** Captures mouse clicks, mouse wheel scrolls, and keystroke chunks via `uiohook-napi`.
+- **Automatic PII Redaction:** Sanitizes API keys (`sk-...`), passwords, tokens, and emails from typed text and active window titles.
+- **Multi-Monitor Display Resolution:** Detects the monitor nearest to the cursor, captures the matching display, and embeds both global coordinates `(cursor.x, cursor.y)` and relative coordinates `(cursor.relativeX, cursor.relativeY)`.
+- **Settled Frame Alignment:** Enforces a 100ms settling delay so OS repaints finish before capturing post-action frames (`before_ts < action_ts < settled_after_ts`).
+- **Live Binary Artifacts:** Streams JPEG frame artifacts to `/artifacts` on the collector, accessible over HTTP at `/artifacts/{id}`.
+
+## Observability and Analytics
+
+Access real-time telemetry across coding sandboxes, CTF challenges, and desktop demonstrations:
+- Navigate to **Settings -> Observability** in Openrind Desktop.
+- **Searchable Project Dropdown:** Switch between project workspaces (`cld3`, `cdx2`, `opnclw2`, `opnhnds2`, `test-capture-10`, etc.).
+- **Live Latency & Token Charts:** Chronological model execution latency progression and context token volume per turn.
+- **Autonomy & Cost Metrics:** Hands-off median duration, intervention density, and retail API spend.
+- **Frame Previews:** Click **"View Frame"** on any span to inspect high-resolution desktop screenshots with cursor overlays.
 
 ## Start Claude In Desktop
 

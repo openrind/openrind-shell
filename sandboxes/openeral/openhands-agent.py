@@ -157,7 +157,7 @@ def install_session_transport(context, base_url=None):
 
                 request.headers['x-w8-haloop-provider'] = provider
                 request.headers['x-w8-haloop-admin-token'] = admin_token
-                request.headers['x-w8-haloop-metadata'] = json.dumps({'project': project_name})
+                request.headers['x-w8-haloop-metadata'] = json.dumps({'project': project_name, 'session_id': context})
                 request.headers['x-w8-haloop-config'] = json.dumps({
                     'input_guardrails': [{'halo.mark': {'collectorURL': collector_url}, 'async': False, 'deny': False}],
                     'output_guardrails': [{'halo.export': {'collectorURL': collector_url, 'defaultProject': project_name}, 'async': False, 'deny': False}],

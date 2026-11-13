@@ -5,9 +5,7 @@ on:
     branches:
       - nemo
       - browser-pods
-      - run/ctf-agent
-      - feature/codex
-      - feat/screen-capture
+      - audit/kimi 
     paths:
       - 'Cargo.lock'
       - 'Cargo.toml'

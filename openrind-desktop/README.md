@@ -74,6 +74,24 @@ Openrind Desktop is designed to be:
   <img src="./docs/images/settings-sandbox.png" alt="Openrind Desktop Sandbox Settings" width="800" />
 </p>
 
+## Observability & Analytics Dashboard
+
+Access the real-time telemetry and performance dashboard under **Settings -> Observability**:
+- **Project Discovery:** Bounded in-app searchable dropdown to switch between projects (`cld3`, `cdx2`, `opnclw2`, `opnhnds2`, `test-capture-10`, etc.).
+- **Response Latency Progression (`ms`):** Turn-by-turn model execution latency graph with average latency badge.
+- **Context Token Progression:** Stacked area chart showing prompt context accumulation alongside completion token output.
+- **Autonomy Metrics:** Hands-off median duration (uninterrupted run time without user prompts) and intervention density (prompts per 50 tool calls).
+- **API-Equivalent Spend:** Real-time dollar estimation computed from published retail token rates across Anthropic, OpenAI, Gemini, DeepSeek, and Qwen models.
+- **Artifact Inspection:** Clickable **"View Frame"** modal to preview captured desktop screenshots and browser frames directly from the collector.
+
+## Desktop Workflow Demonstration Recording
+
+Capture high-quality human demonstrations for Vision-Language-Action (VLA) and agent task imitation:
+- **Global Input Hooks:** Captures global mouse clicks, wheel scrolls, and typed text.
+- **Automatic PII Redaction:** Sanitizes passwords, API keys, tokens, and emails from typed text and active window titles.
+- **Multi-Monitor Display Resolution:** Detects the monitor nearest to the cursor, captures the matching screen source, and records normalized relative coordinates `(relativeX, relativeY)` alongside global coordinates.
+- **Strict Frame Alignment:** Enforces a 100ms settling delay so OS repaints finish, guaranteeing `before_ts < action_ts < settled_after_ts`.
+
 ## Quick Start
 
 ### Requirements

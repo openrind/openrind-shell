@@ -241,12 +241,15 @@ capture paths based on the execution context:
 
 ### 3. OS-Level Desktop Demonstration Recorder (`demonstration-recorder.mjs`)
 - **Engine:** Native host demonstration capture using Electron's `desktopCapturer` and `uiohook-napi` for global input tracking (mouse clicks, scroll events, text keystrokes).
-- **Strict Action-to-Observation Pairing:** Every human action event (`human_action`) is bound to both `frame_before` (visual screen state immediately prior to user input) and `frame_after` (post-action screen capture).
+- **Multi-Monitor Display Resolution:** Automatically detects the display monitor nearest to the cursor position via `screen.getDisplayNearestPoint(cursor)`, selects the matching screen capture source, and embeds display topology metadata (`display.id`, `display.bounds`, `display.scaleFactor`).
+- **Normalized Relative Coordinates:** Records both global virtual-desktop coordinates `(cursor.x, cursor.y)` and frame-relative coordinates `(cursor.relativeX, cursor.relativeY)` mapped to the active monitor, eliminating out-of-bounds coordinates on multi-screen setups.
+- **Settled Frame Alignment:** Enforces a 100ms settling delay before capturing post-action frames (`frame_after`), ensuring the OS and GPU finish repainting window elements (e.g., typed text, focused controls) so that `before_ts < action_ts < settled_after_ts`.
+- **Pre-Capture PII Redaction:** Sanitizes typed keystroke chunks and active window titles before embedding them into `screen_observation.action.text` and `human_action.text`.
 - **Artifact Streaming:** Screen frames are asynchronously streamed to the collector (`POST /artifacts`) with SHA-256 deduplication and accessible over HTTP at `/artifacts/{id}`.
 
 ### 4. Desktop Observability & Analytics Dashboard (`haloop-analytics-view.tsx`)
 - **Location:** Accessible in Openrind Desktop under **Settings -> Observability**.
-- **Dynamic Discovery:** Discovers and lists all project workspaces from `GET /projects` with an in-app searchable dropdown.
+- **Dynamic Discovery:** Discovers and lists all project workspaces from `GET /projects` with an in-app searchable dropdown bounded to the desktop viewport.
 - **Real-Time Telemetry & Charts:**
   - **Latency Progression (ms):** Turn-by-turn model execution latency graph with average latency indicator.
   - **Context Token Progression:** Stacked area chart showing prompt context accumulation alongside completion output per turn.
