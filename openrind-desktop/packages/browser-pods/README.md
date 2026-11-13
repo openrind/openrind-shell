@@ -111,8 +111,8 @@ cannot bind a port.
 FUSE owner. It saves screenshot evidence on `/sandbox/work`. It is a smoke test,
 not the full Stage 0 acceptance suite.
 
-On 2026-10-06, all 47 browser-pod unit tests, all 8 pod file/startup tests,
-all 261 Desktop OpenShell tests,
+On 2026-10-06, all 68 browser-pod unit tests, all 8 pod file/startup tests,
+all 279 Desktop OpenShell tests,
 Electron typecheck, and the real TCP/WebSocket test passed. The transport test
 relayed its 17 MiB payload through the helper and broker with a fake CDP peer.
 
