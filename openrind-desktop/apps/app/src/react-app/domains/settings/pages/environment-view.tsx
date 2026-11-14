@@ -79,7 +79,7 @@ const PREDEFINED_CREDENTIALS: PredefinedCredentialDef[] = [
     envVarName: "CODEX_API_KEY",
     label: "CODEX_API_KEY",
     description:
-      "Codex / OpenAI API key for Codex CLI (or leave blank to route Codex through your OpenRouter key).",
+      "Optional override: Dedicated OpenAI key for Codex CLI (if unset, Codex automatically uses the primary OPENAI_API_KEY or OPENROUTER_API_KEY).",
     placeholder: "sk-...",
   },
   {
@@ -87,8 +87,24 @@ const PREDEFINED_CREDENTIALS: PredefinedCredentialDef[] = [
     envVarName: "OPENAI_API_KEY",
     label: "OPENAI_API_KEY",
     description:
-      "OpenAI API key for OpenClaw, OpenHands, and Codex CLI.",
+      "Primary OpenAI API key used across OpenClaw, OpenHands, and Codex CLI.",
     placeholder: "sk-proj-...",
+  },
+  {
+    statusKey: "haloopGatewayUrl",
+    envVarName: "HALOOP_GATEWAY_URL",
+    label: "HALOOP_GATEWAY_URL",
+    description:
+      "Gateway proxy edge URL for w8-haloop (defaults to http://136.112.93.84:8787 or http://127.0.0.1:8787).",
+    placeholder: "http://127.0.0.1:8787",
+  },
+  {
+    statusKey: "w8AdminToken",
+    envVarName: "ADMIN_TOKEN",
+    label: "ADMIN_TOKEN",
+    description:
+      "Admin authorization token for w8-haloop collector, BYOH rollouts, and secure operations.",
+    placeholder: "w8-catalog-simulation-admin",
   },
   {
     statusKey: "openrindGatewayApiKey",

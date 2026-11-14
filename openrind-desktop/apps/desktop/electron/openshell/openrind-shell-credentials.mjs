@@ -41,7 +41,7 @@ async function getSafeStorage() {
   return safeStorage;
 }
 
-/** @typedef {"databaseUrl" | "anthropicApiKey" | "openRouterApiKey" | "codexApiKey" | "openaiApiKey" | "openrindGatewayApiKey" | "elevenLabsApiKey"} CredentialKey */
+/** @typedef {"databaseUrl" | "anthropicApiKey" | "openRouterApiKey" | "codexApiKey" | "openaiApiKey" | "openrindGatewayApiKey" | "elevenLabsApiKey" | "haloopGatewayUrl" | "w8AdminToken"} CredentialKey */
 
 const CREDENTIAL_KEYS = /** @type {const} */ ([
   "databaseUrl",
@@ -53,6 +53,9 @@ const CREDENTIAL_KEYS = /** @type {const} */ ([
   // ElevenLabs Scribe API key — optional, used for voice dictation
   // in the composer and sandbox terminal.
   "elevenLabsApiKey",
+  // Haloop Gateway Edge URL and Admin Token overrides
+  "haloopGatewayUrl",
+  "w8AdminToken",
 ]);
 
 function maskValue(value) {
