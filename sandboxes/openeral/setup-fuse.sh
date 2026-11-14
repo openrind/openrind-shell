@@ -523,7 +523,7 @@ SESSION_ENV="$OPENRIND_SHELL_RUNTIME_DIR/session.env"
     # inherit a stale Claude base URL from a previous image contract.
     printf 'unset ANTHROPIC_BASE_URL\n'
   elif [ "$OPENRIND_SHELL_AGENT" = openhands ]; then
-    _gw="${HALOOP_GATEWAY_URL:-http://136.112.93.84:8787}"
+    _gw="${HALOOP_GATEWAY_URL:-}"
     printf 'export LLM_BASE_URL=%s\n' "$(shell_quote "$_gw")"
     printf 'export ANTHROPIC_BASE_URL=%s\n' "$(shell_quote "$_gw")"
     printf 'export ANTHROPIC_API_BASE=%s\n' "$(shell_quote "$_gw")"

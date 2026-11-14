@@ -486,20 +486,22 @@ export class DemonstrationRecorder {
       "image/jpeg",
     );
 
-    // Stream image frame artifact immediately to collector in the background so it's viewable instantly via HTTP
-    const targetArtifactsUrl = process.env.HALOOP_ARTIFACTS_URL?.trim() || "http://136.112.93.84:8788/artifacts";
-    fetch(targetArtifactsUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        artifact_id: artifactName,
-        sha256: frameHash,
-        content: base64Data,
-        content_type: "image/jpeg",
-      }),
-    }).catch((err) => {
-      console.warn("[DemonstrationRecorder] Failed to stream frame artifact:", err?.message || err);
-    });
+    // Stream image frame artifact immediately to collector in the background if configured
+    const targetArtifactsUrl = process.env.HALOOP_ARTIFACTS_URL?.trim() || (process.env.HALOOP_COLLECTOR_URL ? `${process.env.HALOOP_COLLECTOR_URL.replace(/\/+$/, "")}/artifacts` : "");
+    if (targetArtifactsUrl) {
+      fetch(targetArtifactsUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          artifact_id: artifactName,
+          sha256: frameHash,
+          content: base64Data,
+          content_type: "image/jpeg",
+        }),
+      }).catch((err) => {
+        console.warn("[DemonstrationRecorder] Failed to stream frame artifact:", err?.message || err);
+      });
+    }
 
     let activeWin = await getActiveWindow();
     if (this.activeSession.scrubPii && activeWin?.title) {

@@ -212,14 +212,14 @@ function readRuntimeEnv() {
 }
 
 export function createHaloopAgentProxy(options = {}) {
-  let targetBase = options.targetBase || process.env.HALOOP_UPSTREAM_URL || process.env.HALOOP_GATEWAY_URL || 'http://136.112.93.84:8787';
+  let targetBase = options.targetBase || process.env.HALOOP_UPSTREAM_URL || process.env.HALOOP_GATEWAY_URL || '';
   if (targetBase.includes(':8785') || targetBase.includes('127.0.0.1:8785')) {
-    targetBase = options.targetBase || process.env.HALOOP_UPSTREAM_URL || process.env.HALOOP_GATEWAY_URL || 'http://136.112.93.84:8787';
-    if (targetBase.includes(':8785') || targetBase.includes('127.0.0.1:8785')) {
-      targetBase = 'http://136.112.93.84:8787';
-    }
+    targetBase = '';
   }
-  const targetUrl = new URL(targetBase);
+  let targetUrl = null;
+  if (targetBase) {
+    try { targetUrl = new URL(targetBase); } catch {}
+  }
   const isHttps = targetUrl.protocol === 'https:';
   const client = isHttps ? https : http;
 
@@ -250,15 +250,50 @@ export function createHaloopAgentProxy(options = {}) {
   }
 
   function sendUpstream(reqPath, reqMethod, reqHeaders, callback) {
-    const headers = { ...reqHeaders, host: targetUrl.host };
+    const runtimeEnv = readRuntimeEnv();
+    let effectiveBase = (
+      runtimeEnv.HALOOP_GATEWAY_URL ||
+      runtimeEnv.W8_GATEWAY_URL ||
+      runtimeEnv.HALOOP_UPSTREAM_URL ||
+      options.targetBase ||
+      process.env.HALOOP_UPSTREAM_URL ||
+      process.env.HALOOP_GATEWAY_URL ||
+      ''
+    ).trim();
+    if (effectiveBase.includes(':8785') || effectiveBase.includes('127.0.0.1:8785')) {
+      effectiveBase = '';
+    }
+    if (!effectiveBase) {
+      throw new Error('HALOOP_GATEWAY_URL is not configured. Please enter your gateway URL in Settings -> Environment.');
+    }
+    const currentTargetUrl = new URL(effectiveBase);
+    const currentIsHttps = currentTargetUrl.protocol === 'https:';
+    const currentClient = currentIsHttps ? https : http;
+
+    const currentAdminToken = (
+      options.adminToken ||
+      process.env.ADMIN_TOKEN ||
+      process.env.W8_ADMIN_TOKEN ||
+      process.env.W8_BYOH_ADMIN_TOKEN ||
+      runtimeEnv.ADMIN_TOKEN ||
+      runtimeEnv.W8_ADMIN_TOKEN ||
+      runtimeEnv.W8_BYOH_ADMIN_TOKEN ||
+      ''
+    ).trim();
+
+    const headers = { ...reqHeaders, host: currentTargetUrl.host };
+    if (currentAdminToken) {
+      headers['x-admin-token'] = currentAdminToken;
+      headers['x-w8-haloop-admin-token'] = currentAdminToken;
+    }
 
     // When NODE_USE_ENV_PROXY=1 is active (Node 22 built-in proxy agent),
-    // client.request automatically tunnels through HTTP_PROXY to targetUrl.hostname:targetUrl.port.
+    // client.request automatically tunnels through HTTP_PROXY to currentTargetUrl.hostname:currentTargetUrl.port.
     if (process.env.NODE_USE_ENV_PROXY === '1') {
-      return client.request({
-        protocol: targetUrl.protocol,
-        hostname: targetUrl.hostname,
-        port: targetUrl.port || (isHttps ? 443 : 80),
+      return currentClient.request({
+        protocol: currentTargetUrl.protocol,
+        hostname: currentTargetUrl.hostname,
+        port: currentTargetUrl.port || (currentIsHttps ? 443 : 80),
         path: reqPath,
         method: reqMethod,
         headers,
@@ -266,8 +301,8 @@ export function createHaloopAgentProxy(options = {}) {
     }
 
     // Fallback if NODE_USE_ENV_PROXY is not active and proxyUrl is defined
-    if (proxyUrl && targetUrl.protocol === 'http:') {
-      const fullUrl = `${targetUrl.protocol}//${targetUrl.host}${reqPath}`;
+    if (proxyUrl && currentTargetUrl.protocol === 'http:') {
+      const fullUrl = `${currentTargetUrl.protocol}//${currentTargetUrl.host}${reqPath}`;
       return http.request({
         protocol: proxyUrl.protocol,
         hostname: proxyUrl.hostname,
@@ -278,10 +313,10 @@ export function createHaloopAgentProxy(options = {}) {
       }, callback);
     }
 
-    return client.request({
-      protocol: targetUrl.protocol,
-      hostname: targetUrl.hostname,
-      port: targetUrl.port || (isHttps ? 443 : 80),
+    return currentClient.request({
+      protocol: currentTargetUrl.protocol,
+      hostname: currentTargetUrl.hostname,
+      port: currentTargetUrl.port || (currentIsHttps ? 443 : 80),
       path: reqPath,
       method: reqMethod,
       headers,
@@ -310,6 +345,27 @@ export function createHaloopAgentProxy(options = {}) {
     let chunks = [];
     req.on('data', c => chunks.push(c));
     req.on('end', () => {
+      const runtimeEnv = readRuntimeEnv();
+      const currentGateway = (
+        runtimeEnv.HALOOP_GATEWAY_URL ||
+        runtimeEnv.W8_GATEWAY_URL ||
+        runtimeEnv.HALOOP_UPSTREAM_URL ||
+        options.targetBase ||
+        process.env.HALOOP_UPSTREAM_URL ||
+        process.env.HALOOP_GATEWAY_URL ||
+        ''
+      ).trim();
+
+      if (!currentGateway || currentGateway.includes(':8785') || currentGateway.includes('127.0.0.1:8785')) {
+        res.writeHead(503, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({
+          error: {
+            type: 'configuration_error',
+            message: 'HALOOP_GATEWAY_URL is not configured. Please enter your gateway URL in Openrind Desktop Settings -> Environment.',
+          },
+        }));
+        return;
+      }
       const rawBody = Buffer.concat(chunks);
       let body;
       try {
@@ -476,7 +532,7 @@ export function createHaloopAgentProxy(options = {}) {
         const openAiPayload = JSON.stringify(payloadObj);
 
         const projectName = resolveProjectName();
-        const collectorUrl = process.env.HALOOP_COLLECTOR_URL || 'http://136.112.93.84:8788';
+        const collectorUrl = (process.env.HALOOP_COLLECTOR_URL || runtimeEnv.HALOOP_COLLECTOR_URL || '').trim();
         const sessionContext = process.env.OPENRIND_HALOOP_SESSION_CONTEXT || req.headers['x-openrind-haloop-session'] || '';
         const forwardHeaders = {
           'content-type': 'application/json',
@@ -484,10 +540,12 @@ export function createHaloopAgentProxy(options = {}) {
           'x-w8-haloop-provider': route.provider,
           ...(adminToken ? { 'x-w8-haloop-admin-token': adminToken } : {}),
           'x-w8-haloop-metadata': JSON.stringify({ project: projectName, session_id: proxySessionId, trace_id: proxySessionId }),
-          'x-w8-haloop-config': JSON.stringify({
-            input_guardrails: [{ 'halo.mark': { collectorURL: collectorUrl }, async: false, deny: false }],
-            output_guardrails: [{ 'halo.export': { collectorURL: collectorUrl, defaultProject: projectName }, async: false, deny: false }],
-          }),
+          ...(collectorUrl ? {
+            'x-w8-haloop-config': JSON.stringify({
+              input_guardrails: [{ 'halo.mark': { collectorURL: collectorUrl }, async: false, deny: false }],
+              output_guardrails: [{ 'halo.export': { collectorURL: collectorUrl, defaultProject: projectName }, async: false, deny: false }],
+            }),
+          } : {}),
         };
 
         if (sessionContext) {
@@ -766,7 +824,7 @@ export function createHaloopAgentProxy(options = {}) {
         const openAiPayload = JSON.stringify(payloadObj);
 
         const projectName = resolveProjectName();
-        const collectorUrl = process.env.HALOOP_COLLECTOR_URL || 'http://136.112.93.84:8788';
+        const collectorUrl = (process.env.HALOOP_COLLECTOR_URL || runtimeEnv.HALOOP_COLLECTOR_URL || '').trim();
         const sessionContext = process.env.OPENRIND_HALOOP_SESSION_CONTEXT || req.headers['x-openrind-haloop-session'] || '';
         const forwardHeaders = {
           'content-type': 'application/json',
@@ -774,10 +832,12 @@ export function createHaloopAgentProxy(options = {}) {
           'x-w8-haloop-provider': messagesRoute.provider,
           ...(adminToken ? { 'x-w8-haloop-admin-token': adminToken } : {}),
           'x-w8-haloop-metadata': JSON.stringify({ project: projectName, session_id: proxySessionId, trace_id: proxySessionId }),
-          'x-w8-haloop-config': JSON.stringify({
-            input_guardrails: [{ 'halo.mark': { collectorURL: collectorUrl }, async: false, deny: false }],
-            output_guardrails: [{ 'halo.export': { collectorURL: collectorUrl, defaultProject: projectName }, async: false, deny: false }],
-          }),
+          ...(collectorUrl ? {
+            'x-w8-haloop-config': JSON.stringify({
+              input_guardrails: [{ 'halo.mark': { collectorURL: collectorUrl }, async: false, deny: false }],
+              output_guardrails: [{ 'halo.export': { collectorURL: collectorUrl, defaultProject: projectName }, async: false, deny: false }],
+            }),
+          } : {}),
         };
 
         if (sessionContext) {
@@ -1224,16 +1284,18 @@ export function createHaloopAgentProxy(options = {}) {
       // Default passthrough for other routes or if using native anthropic key
       const passthroughRoute = resolveProviderAndAuth(req.url?.includes('chat/completions') ? 'chat_completions' : (isMessages ? 'messages' : 'chat_completions'));
       const projectName = resolveProjectName();
-      const collectorUrl = process.env.HALOOP_COLLECTOR_URL || 'http://136.112.93.84:8788';
+      const collectorUrl = (process.env.HALOOP_COLLECTOR_URL || runtimeEnv.HALOOP_COLLECTOR_URL || '').trim();
       const sessionContext = process.env.OPENRIND_HALOOP_SESSION_CONTEXT || req.headers['x-openrind-haloop-session'] || '';
       const headers = { ...req.headers };
       headers['x-w8-haloop-provider'] = passthroughRoute.provider || provider;
       headers['x-w8-haloop-admin-token'] = adminToken;
       headers['x-w8-haloop-metadata'] = JSON.stringify({ project: projectName, session_id: proxySessionId, trace_id: proxySessionId });
-      headers['x-w8-haloop-config'] = JSON.stringify({
-        input_guardrails: [{ 'halo.mark': { collectorURL: collectorUrl }, async: false, deny: false }],
-        output_guardrails: [{ 'halo.export': { collectorURL: collectorUrl, defaultProject: projectName }, async: false, deny: false }],
-      });
+      if (collectorUrl) {
+        headers['x-w8-haloop-config'] = JSON.stringify({
+          input_guardrails: [{ 'halo.mark': { collectorURL: collectorUrl }, async: false, deny: false }],
+          output_guardrails: [{ 'halo.export': { collectorURL: collectorUrl, defaultProject: projectName }, async: false, deny: false }],
+        });
+      }
 
       if (sessionContext) {
         headers['x-openrind-haloop-session'] = sessionContext;

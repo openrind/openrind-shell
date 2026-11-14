@@ -471,7 +471,7 @@ test("OpenClaw uses the same FUSE workspace with a separate persistent agent hom
   assert.match(setup, /shared clear-rewrite budget/);
   assert.match(config, /config\.agents\.defaults\.models\[primaryModel\]/);
   assert.match(config, /const PROVIDER_ID = "openrind-gateway"/);
-  assert.match(config, /http:\/\/136\.112\.93\.84:8787/);
+  assert.match(config, /const DEFAULT_GATEWAY_URL = "";/);
   assert.match(config, /const DEFAULT_MODEL_ID = "claude-sonnet-4-6"/);
   assert.doesNotMatch(config, /OPENRIND_SHELL_USE_OPENROUTER_TEST|openrouter\/openrouter\/free/);
   assert.match(config, /delete config\.env\.OPENROUTER_API_KEY/);
@@ -645,7 +645,7 @@ test("FUSE images package the fixed Haloop configurator", async () => {
   }
   assert.match(
     configurator,
-    /http:\/\/136\.112\.93\.84:8787/,
+    /HALOOP_ANTHROPIC_BASE_URL/,
   );
   assert.doesNotMatch(configurator, /api\.anthropic\.com/);
   assert.doesNotMatch(configurator, /process\.env\.OPENRIND_HALOOP/);

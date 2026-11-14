@@ -814,20 +814,31 @@ function openOpenrindShellPtySession(opts) {
       let upstreamKey = "";
       try { upstreamKey = await openrindShell.requiredHaloopUpstreamApiKey(); } catch {}
       upstreamKey = (upstreamKey || process.env.ANTHROPIC_API_KEY || "").trim();
-      const [anthropicApiKey, openRouterApiKey, codexApiKey, openaiApiKey] = await Promise.all([
+      const [anthropicApiKey, openRouterApiKey, codexApiKey, openaiApiKey, haloopGatewayUrl, w8AdminToken] = await Promise.all([
         openrindCredentials.getCredential("anthropicApiKey").catch(() => null),
         openrindCredentials.getCredential("openRouterApiKey").catch(() => null),
         openrindCredentials.getCredential("codexApiKey").catch(() => null),
         openrindCredentials.getCredential("openaiApiKey").catch(() => null),
+        openrindCredentials.getCredential("haloopGatewayUrl").catch(() => null),
+        openrindCredentials.getCredential("w8AdminToken").catch(() => null),
       ]);
       const keyBundle = {
         anthropicApiKey: anthropicApiKey || (upstreamKey.startsWith("sk-ant-") ? upstreamKey : null),
         openRouterApiKey: openRouterApiKey || (upstreamKey.startsWith("sk-or-") ? upstreamKey : null),
         codexApiKey: codexApiKey || (!upstreamKey.startsWith("sk-ant-") && !upstreamKey.startsWith("sk-or-") ? upstreamKey : null),
         openaiApiKey: openaiApiKey || codexApiKey,
+        haloopGatewayUrl: haloopGatewayUrl || process.env.HALOOP_GATEWAY_URL || null,
+        w8AdminToken: w8AdminToken || process.env.ADMIN_TOKEN || process.env.W8_BYOH_ADMIN_TOKEN || null,
       };
       await openrindShell.ensureBrowserPod(sandboxName).catch(() => {});
       await openrindShell.ensureRuntimeScripts(sandboxName).catch(() => {});
+      if (keyBundle.haloopGatewayUrl) {
+        openrindShell.updateSandboxPolicyForGateway(
+          sandboxName,
+          keyBundle.haloopGatewayUrl,
+          keyBundle.haloopCollectorUrl,
+        ).catch(() => {});
+      }
       await writeOpenrindShellSessionMarker(
         sandboxName,
         profile,
@@ -3428,19 +3439,30 @@ async function handleDesktopInvoke(event, command, ...args) {
         let upstreamKey = "";
         try { upstreamKey = await openrindShell.requiredHaloopUpstreamApiKey(); } catch {}
         upstreamKey = (upstreamKey || process.env.ANTHROPIC_API_KEY || "").trim();
-        const [anthropicApiKey, openRouterApiKey, codexApiKey, openaiApiKey] = await Promise.all([
+        const [anthropicApiKey, openRouterApiKey, codexApiKey, openaiApiKey, haloopGatewayUrl, w8AdminToken] = await Promise.all([
           openrindCredentials.getCredential("anthropicApiKey").catch(() => null),
           openrindCredentials.getCredential("openRouterApiKey").catch(() => null),
           openrindCredentials.getCredential("codexApiKey").catch(() => null),
           openrindCredentials.getCredential("openaiApiKey").catch(() => null),
+          openrindCredentials.getCredential("haloopGatewayUrl").catch(() => null),
+          openrindCredentials.getCredential("w8AdminToken").catch(() => null),
         ]);
         const keyBundle = {
           anthropicApiKey: anthropicApiKey || (upstreamKey.startsWith("sk-ant-") ? upstreamKey : null),
           openRouterApiKey: openRouterApiKey || (upstreamKey.startsWith("sk-or-") ? upstreamKey : null),
           codexApiKey: codexApiKey || (!upstreamKey.startsWith("sk-ant-") && !upstreamKey.startsWith("sk-or-") ? upstreamKey : null),
           openaiApiKey: openaiApiKey || codexApiKey,
+          haloopGatewayUrl: haloopGatewayUrl || process.env.HALOOP_GATEWAY_URL || null,
+          w8AdminToken: w8AdminToken || process.env.ADMIN_TOKEN || process.env.W8_BYOH_ADMIN_TOKEN || null,
         };
         await openrindShell.ensureRuntimeScripts(sandboxName).catch(() => {});
+        if (keyBundle.haloopGatewayUrl) {
+          openrindShell.updateSandboxPolicyForGateway(
+            sandboxName,
+            keyBundle.haloopGatewayUrl,
+            keyBundle.haloopCollectorUrl,
+          ).catch(() => {});
+        }
         await writeOpenrindShellSessionMarker(
           sandboxName,
           profile,
@@ -3611,10 +3633,32 @@ async function handleDesktopInvoke(event, command, ...args) {
     }
     case "openrindFetchCollector": {
       const endpointPath = String(args[0] || "/stats");
-      const targetBase = (process.env.HALOOP_COLLECTOR_URL?.trim() || "http://136.112.93.84:8788").replace(/\/+$/, "");
+      const passedCollector = String(args[1] || "").trim();
+      const storedGateway = (await openrindCredentials.getCredential("haloopGatewayUrl").catch(() => null)) || process.env.HALOOP_GATEWAY_URL?.trim();
+      let defaultCollector = "";
+      if (passedCollector) {
+        defaultCollector = passedCollector.replace(/\/+$/, "");
+      } else if (storedGateway) {
+        try {
+          const u = new URL(storedGateway);
+          u.port = "8788";
+          u.pathname = "";
+          defaultCollector = u.origin;
+        } catch {}
+      }
+      const targetBase = (process.env.HALOOP_COLLECTOR_URL?.trim() || defaultCollector).replace(/\/+$/, "");
+      if (!targetBase) {
+        throw new Error("Collector URL is not configured. Please enter your collector URL in Observability or Environment settings.");
+      }
       const fullUrl = `${targetBase}${endpointPath.startsWith("/") ? "" : "/"}${endpointPath}`;
+      const adminToken = (await openrindCredentials.getCredential("w8AdminToken").catch(() => null)) || process.env.ADMIN_TOKEN?.trim() || "";
       try {
-        const res = await fetch(fullUrl, { signal: AbortSignal.timeout(5000) });
+        const headers = {};
+        if (adminToken) {
+          headers["Authorization"] = `Bearer ${adminToken}`;
+          headers["X-Admin-Token"] = adminToken;
+        }
+        const res = await fetch(fullUrl, { headers, signal: AbortSignal.timeout(30000) });
         if (!res.ok) throw new Error(`Collector ${endpointPath} returned HTTP ${res.status}`);
         return await res.json();
       } catch (err) {
@@ -3627,9 +3671,27 @@ async function handleDesktopInvoke(event, command, ...args) {
         demonstrationRecorder = new DemonstrationRecorder({
           getMainWindow: () => mainWindow,
           postCollectorEvents: async (bundle) => {
-            // Send captured records as app spans to POST /spans (which registers the project in store.append_span)
-            const targetSpansUrl = process.env.HALOOP_SPANS_URL?.trim() || "http://136.112.93.84:8788/spans";
-            const targetEventsUrl = process.env.HALOOP_COLLECTOR_URL?.trim() || "http://136.112.93.84:8788/internal/capture/events";
+            const storedGateway = (await openrindCredentials.getCredential("haloopGatewayUrl").catch(() => null)) || process.env.HALOOP_GATEWAY_URL?.trim();
+            let defaultCollector = "";
+            if (storedGateway) {
+              try {
+                const u = new URL(storedGateway);
+                u.port = "8788";
+                u.pathname = "";
+                defaultCollector = u.origin;
+              } catch {}
+            }
+            const targetSpansUrl = process.env.HALOOP_SPANS_URL?.trim() || (defaultCollector ? `${defaultCollector}/spans` : "");
+            const targetEventsUrl = process.env.HALOOP_COLLECTOR_URL?.trim() || (defaultCollector ? `${defaultCollector}/internal/capture/events` : "");
+            if (!targetSpansUrl) {
+              return;
+            }
+            const adminToken = (await openrindCredentials.getCredential("w8AdminToken").catch(() => null)) || process.env.ADMIN_TOKEN?.trim() || "";
+            const authHeaders = {};
+            if (adminToken) {
+              authHeaders["Authorization"] = `Bearer ${adminToken}`;
+              authHeaders["X-Admin-Token"] = adminToken;
+            }
 
             const spansBatch = [];
             for (const record of bundle.records) {
@@ -3685,8 +3747,8 @@ async function handleDesktopInvoke(event, command, ...args) {
             }
 
             // Also post the artifacts (images) directly to the collector /artifacts endpoint
-            if (bundle.artifacts) {
-              const targetArtifactsUrl = process.env.HALOOP_ARTIFACTS_URL?.trim() || "http://136.112.93.84:8788/artifacts";
+            if (bundle.artifacts && defaultCollector) {
+              const targetArtifactsUrl = process.env.HALOOP_ARTIFACTS_URL?.trim() || `${defaultCollector}/artifacts`;
               for (const [hash, item] of Object.entries(bundle.artifacts)) {
                 try {
                   const b64 = item.buffer ? item.buffer.toString("base64") : "";
