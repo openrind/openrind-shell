@@ -33,7 +33,6 @@ export {
   uploadWorkspaceFile,
   updateSandboxPolicyForGateway,
 } from "./fuse-sandbox.mjs";
-export { updateSandboxPolicyForGateway } from "./fuse-sandbox.mjs";
 export {
   deletePrimaryFuseSandbox as deleteOpenrindShellSandbox,
   listPrimaryFuseSandboxes as listSandboxes,
