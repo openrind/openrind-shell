@@ -31,6 +31,7 @@ export {
   ensureBrowserPod,
   ensureRuntimeScripts,
   uploadWorkspaceFile,
+  updateSandboxPolicyForGateway,
 } from "./fuse-sandbox.mjs";
 export {
   deletePrimaryFuseSandbox as deleteOpenrindShellSandbox,
@@ -208,9 +209,11 @@ export async function writeCurrentSessionMarker(name, value, browserGrant, brows
     }
     if (apiKey.haloopGatewayUrl) {
       lines.push(`export HALOOP_GATEWAY_URL=${shellQuote(apiKey.haloopGatewayUrl)}`);
+      lines.push(`export W8_GATEWAY_URL=${shellQuote(apiKey.haloopGatewayUrl)}`);
     }
     if (apiKey.w8AdminToken) {
       lines.push(`export ADMIN_TOKEN=${shellQuote(apiKey.w8AdminToken)}`);
+      lines.push(`export W8_ADMIN_TOKEN=${shellQuote(apiKey.w8AdminToken)}`);
       lines.push(`export W8_BYOH_ADMIN_TOKEN=${shellQuote(apiKey.w8AdminToken)}`);
     }
     if (lines.length > 0) {

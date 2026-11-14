@@ -40,8 +40,8 @@ except ImportError as exc:
     sys.exit(f"Error importing build_session_bundle_bytes from {HALO_LOOP_DIR}: {exc}")
 
 
-DEFAULT_COLLECTOR_URL = os.environ.get("HALOOP_COLLECTOR_URL", "http://136.112.93.84:8788")
-DEFAULT_ADMIN_TOKEN = os.environ.get("BYOH_ADMIN_TOKEN", "w8-catalog-simulation-admin")
+DEFAULT_COLLECTOR_URL = os.environ.get("HALOOP_COLLECTOR_URL", "")
+DEFAULT_ADMIN_TOKEN = os.environ.get("BYOH_ADMIN_TOKEN", "")
 
 
 def get_default_download_dir() -> pathlib.Path:

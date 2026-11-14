@@ -71,7 +71,7 @@ export SHELL=/bin/bash
 PROXY_PID=""
 if [ -f /opt/openrind-shell/haloop-agent-proxy.mjs ]; then
   pkill -f haloop-agent-proxy.mjs 2>/dev/null || true
-  export HALOOP_GATEWAY_URL="${HALOOP_GATEWAY_URL:-${HALOOP_UPSTREAM_URL:-http://136.112.93.84:8787}}"
+  export HALOOP_GATEWAY_URL="${HALOOP_GATEWAY_URL:-${HALOOP_UPSTREAM_URL:-}}"
   export HALOOP_UPSTREAM_URL="$HALOOP_GATEWAY_URL"
   export NODE_USE_ENV_PROXY=1
   nohup /usr/bin/node /opt/openrind-shell/haloop-agent-proxy.mjs </dev/null >"$RUNTIME_DIR/proxy.log" 2>&1 &

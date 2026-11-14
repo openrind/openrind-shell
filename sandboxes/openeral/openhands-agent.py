@@ -15,19 +15,13 @@ import uuid
 WORKSPACE = Path('/sandbox/work')
 
 
-AUTHORIZED_GATEWAY_HOSTS = ('136.112.93.84', 'host.openshell.internal', '127.0.0.1', 'localhost', '136.123.45.67')
-
-
 def normalize_gateway_url(url_str):
     if not url_str or not str(url_str).strip():
-        return 'http://136.112.93.84:8787'
+        return ''
     raw = str(url_str).strip()
     if not (raw.startswith('http://') or raw.startswith('https://')):
         raw = 'http://' + raw
     parsed = urlparse(raw)
-    host = parsed.hostname or ''
-    if host not in AUTHORIZED_GATEWAY_HOSTS:
-        raise ValueError(f"OpenShell network policy blocks arbitrary gateway host '{host}'. Only authorized gateway and loopback hosts are permitted.")
     path = parsed.path
     for suffix in ('/v1/chat/completions', '/chat/completions', '/v1/messages/count_tokens', '/v1/messages', '/v1'):
         if path.endswith(suffix):
@@ -37,7 +31,7 @@ def normalize_gateway_url(url_str):
     return f"{parsed.scheme}://{parsed.netloc}{path}"
 
 
-BASE_URL = normalize_gateway_url(os.environ.get('HALOOP_GATEWAY_URL') or os.environ.get('ANTHROPIC_BASE_URL') or os.environ.get('LLM_BASE_URL') or 'http://136.112.93.84:8787')
+BASE_URL = normalize_gateway_url(os.environ.get('HALOOP_GATEWAY_URL') or os.environ.get('ANTHROPIC_BASE_URL') or os.environ.get('LLM_BASE_URL') or '')
 CONTEXT_RE = re.compile(r'v1\.[0-9a-f]{32}\.[1-9][0-9]{9,15}\.[1-9][0-9]{9,15}\.[0-9a-f]{64}')
 
 
@@ -133,9 +127,9 @@ def install_session_transport(context, base_url=None):
                 admin_token = (
                     os.environ.get('ADMIN_TOKEN')
                     or os.environ.get('W8_BYOH_ADMIN_TOKEN')
-                    or 'w8-catalog-simulation-admin'
+                    or ''
                 )
-                collector_url = os.environ.get('HALOOP_COLLECTOR_URL') or 'http://136.112.93.84:8788'
+                collector_url = os.environ.get('HALOOP_COLLECTOR_URL') or ''
                 project_name = (
                     os.environ.get('OPENRIND_SHELL_WORKSPACE_ID')
                     or os.environ.get('WORKSPACE_ID')

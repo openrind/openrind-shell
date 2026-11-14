@@ -2,6 +2,8 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -39,6 +41,90 @@ function resolveFusePolicyPath() {
   const fallback = path.resolve(REPOSITORY_ROOT, "sandboxes/openeral/policy.yaml");
   if (existsSync(fallback)) return fallback;
   return null;
+}
+
+export async function prepareEffectiveFusePolicyPath(customGatewayUrl, customCollectorUrl) {
+  const basePolicyPath = resolveFusePolicyPath();
+  if (!basePolicyPath) return null;
+
+  const urls = [customGatewayUrl, customCollectorUrl].filter(Boolean);
+  const newEndpoints = [];
+  for (const raw of urls) {
+    try {
+      const u = new URL(raw);
+      const host = u.hostname;
+      const port = Number(u.port || (u.protocol === "https:" ? 443 : 8787));
+      if (host && host !== "127.0.0.1" && host !== "localhost" && host !== "host.openshell.internal") {
+        newEndpoints.push({ host, port });
+      }
+    } catch {}
+  }
+
+  if (newEndpoints.length === 0) {
+    return basePolicyPath;
+  }
+
+  let baseContent = "";
+  try {
+    baseContent = await readFile(basePolicyPath, "utf8");
+  } catch {
+    return basePolicyPath;
+  }
+
+  let endpointBlocks = "";
+  for (const { host, port } of newEndpoints) {
+    endpointBlocks += `
+      - host: ${host}
+        port: ${port}
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow: { method: POST, path: "/v1/messages" }
+          - allow: { method: POST, path: "/v1/messages/count_tokens" }
+          - allow: { method: POST, path: "/v1/chat/completions" }
+          - allow: { method: POST, path: "/chat/completions" }
+          - allow: { method: POST, path: "/v1/responses" }
+          - allow: { method: GET, path: "/v1/models" }
+          - allow: { method: GET, path: "/health" }
+          - allow: { method: GET, path: "/healthz" }
+          - allow: { method: POST, path: "/**" }
+          - allow: { method: GET, path: "/**" }
+      - host: ${host}
+        port: ${port + 1}
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow: { method: POST, path: "/v1/messages" }
+          - allow: { method: POST, path: "/v1/messages/count_tokens" }
+          - allow: { method: POST, path: "/v1/chat/completions" }
+          - allow: { method: POST, path: "/chat/completions" }
+          - allow: { method: GET, path: "/health" }
+          - allow: { method: GET, path: "/healthz" }
+          - allow: { method: POST, path: "/**" }
+          - allow: { method: GET, path: "/**" }`;
+  }
+
+  let modified = baseContent;
+  if (modified.includes("name: haloop-anthropic")) {
+    modified = modified.replace(
+      /(\s+name:\s*haloop-anthropic\s+endpoints:)/,
+      `$1${endpointBlocks}`,
+    );
+  }
+  if (modified.includes("name: haloop-agent-proxy")) {
+    modified = modified.replace(
+      /(\s+name:\s*haloop-agent-proxy\s+endpoints:)/,
+      `$1${endpointBlocks}`,
+    );
+  }
+
+  const generatedPath = path.join(os.tmpdir(), "openrind-fuse-policy-effective.yaml");
+  try {
+    await writeFile(generatedPath, modified, "utf8");
+    return generatedPath;
+  } catch {
+    return basePolicyPath;
+  }
 }
 
 const IMAGE_CONTRACT = "fuse-haloop-required-v29-browser-client";
@@ -193,6 +279,8 @@ endpoints:
       - allow: { method: POST, path: "/v1/messages/count_tokens" }
       - allow: { method: POST, path: "/v1/chat/completions" }
       - allow: { method: POST, path: "/chat/completions" }
+      - allow: { method: POST, path: "/v1/responses" }
+      - allow: { method: GET, path: "/v1/models" }
       - allow: { method: GET, path: "/health" }
       - allow: { method: GET, path: "/healthz" }
   - host: 136.112.93.84
@@ -211,10 +299,48 @@ binaries: [/usr/bin/claude, /usr/local/bin/claude, /usr/local/bin/claude-real, /
 
 export async function ensureHaloopProfileImported() {
   const profilePath = "/home/banker/.local/state/openrind-desktop/fuse-gateway/haloop-anthropic.yaml";
+  const storedGateway = (await getCredential("haloopGatewayUrl").catch(() => null)) || process.env.HALOOP_GATEWAY_URL?.trim();
+  let dynamicEndpoints = "";
+  if (storedGateway) {
+    try {
+      const u = new URL(storedGateway);
+      const host = u.hostname;
+      const port = Number(u.port || (u.protocol === "https:" ? 443 : 8787));
+      dynamicEndpoints = `
+  - host: ${host}
+    port: ${port}
+    protocol: rest
+    enforcement: enforce
+    rules:
+      - allow: { method: POST, path: "/v1/messages" }
+      - allow: { method: POST, path: "/v1/messages/count_tokens" }
+      - allow: { method: POST, path: "/v1/chat/completions" }
+      - allow: { method: POST, path: "/chat/completions" }
+      - allow: { method: POST, path: "/v1/responses" }
+      - allow: { method: GET, path: "/v1/models" }
+      - allow: { method: GET, path: "/health" }
+      - allow: { method: GET, path: "/healthz" }
+  - host: ${host}
+    port: ${port + 1}
+    protocol: rest
+    enforcement: enforce
+    rules:
+      - allow: { method: POST, path: "/v1/messages" }
+      - allow: { method: POST, path: "/v1/messages/count_tokens" }
+      - allow: { method: POST, path: "/v1/chat/completions" }
+      - allow: { method: POST, path: "/chat/completions" }
+      - allow: { method: GET, path: "/health" }
+      - allow: { method: GET, path: "/healthz" }
+`;
+    } catch {}
+  }
+  const content = dynamicEndpoints
+    ? HALOOP_PROFILE_YAML.replace("binaries:", `${dynamicEndpoints}\nbinaries:`)
+    : HALOOP_PROFILE_YAML;
   const script = `mkdir -p $(dirname ${shellQuote(profilePath)}) && cat > ${shellQuote(profilePath)}`;
   await wslRun(
     ["-d", DISTRO_NAME, "--", "sh", "-c", script],
-    { stdin: HALOOP_PROFILE_YAML, timeout: 10_000 },
+    { stdin: content, timeout: 10_000 },
   ).catch(() => null);
 
   await runFuseOpenShell(
@@ -937,7 +1063,7 @@ async function provisionOpenrindShellSandbox(options) {
     "--provider",
     haloop.providerName,
   ];
-  const policyFile = resolveFusePolicyPath();
+  const policyFile = await prepareEffectiveFusePolicyPath(haloop.endpoint);
   if (policyFile) {
     sandboxArgs.push("--policy", toWslPath(policyFile));
   }
@@ -957,15 +1083,8 @@ async function provisionOpenrindShellSandbox(options) {
   );
   if (haloop.endpoint) {
     try {
-      const parsedUrl = new URL(haloop.endpoint);
-      const host = parsedUrl.hostname;
-      if (host !== "136.112.93.84" && host !== "host.openshell.internal" && host !== "127.0.0.1" && host !== "localhost") {
-        throw new Error(`OpenShell policy blocks arbitrary gateway host '${host}'. Only '136.112.93.84' and 'host.openshell.internal' are authorized.`);
-      }
-    } catch (err) {
-      if (err.message.includes("OpenShell policy blocks")) {
-        throw err;
-      }
+      new URL(haloop.endpoint);
+    } catch {
       throw new Error(`Invalid Haloop gateway URL: ${haloop.endpoint}`);
     }
     sandboxArgs.push("--env", `HALOOP_GATEWAY_URL=${haloop.endpoint}`);
@@ -1399,6 +1518,46 @@ export async function waitCurrentSessionMarkerConsumed(name, _env, timeoutMs = 5
     { ensure: false, timeout: timeoutMs + 5_000 },
   ).catch(() => null);
   return result?.exitCode === 0;
+}
+
+export async function updateSandboxPolicyForGateway(sandboxName, gatewayUrl, collectorUrl) {
+  if (!sandboxName) return;
+  const generatedPolicyPath = await prepareEffectiveFusePolicyPath(gatewayUrl, collectorUrl);
+  if (generatedPolicyPath) {
+    const wslPolicyPath = toWslPath(generatedPolicyPath);
+    await runFuseOpenShell([
+      "policy", "set", sandboxName, "--policy", wslPolicyPath,
+    ], { ensure: false, timeout: 15_000 }).catch(() => null);
+
+    await runFuseOpenShell([
+      "policy", "set", "--global", "--policy", wslPolicyPath, "--yes",
+    ], { ensure: false, timeout: 15_000 }).catch(() => null);
+  }
+
+  const urls = [gatewayUrl, collectorUrl].filter(Boolean);
+  for (const rawUrl of urls) {
+    try {
+      const u = new URL(rawUrl);
+      const host = u.hostname;
+      const port = Number(u.port || (u.protocol === "https:" ? 443 : 8787));
+      if (host && host !== "127.0.0.1" && host !== "localhost" && host !== "host.openshell.internal") {
+        await runFuseOpenShell([
+          "policy", "update", sandboxName,
+          "--add-endpoint", `${host}:${port}:read-write:rest:enforce`,
+          "--add-allow", `${host}:${port}:POST:/**`,
+          "--add-allow", `${host}:${port}:GET:/**`,
+          "--binary", "/usr/bin/claude",
+          "--binary", "/usr/local/bin/claude",
+          "--binary", "/usr/local/bin/claude-real",
+          "--binary", "/usr/local/bin/openrind-openclaw-agent",
+          "--binary", "/usr/local/bin/openrind-openhands-agent",
+          "--binary", "/usr/local/bin/codex",
+          "--binary", "/usr/bin/codex",
+          "--binary", "/usr/bin/node",
+        ], { ensure: false, timeout: 15_000 }).catch(() => null);
+      }
+    } catch {}
+  }
 }
 
 export async function probeDatabaseUrl() {

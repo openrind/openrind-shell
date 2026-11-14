@@ -124,13 +124,13 @@ def test_launch_rejects_missing_provider_credential(monkeypatch):
 
 
 @pytest.mark.parametrize('input_url,expected', [
-    ('http://136.112.93.84:8787/v1/chat/completions', 'http://136.112.93.84:8787'),
-    ('http://136.112.93.84/v1/chat/completions', 'http://136.112.93.84'),
+    ('http://10.0.0.1:8787/v1/chat/completions', 'http://10.0.0.1:8787'),
+    ('http://10.0.0.1/v1/chat/completions', 'http://10.0.0.1'),
     ('http://host.openshell.internal:8787/v1/messages', 'http://host.openshell.internal:8787'),
     ('http://host.openshell.internal:8787/chat/completions', 'http://host.openshell.internal:8787'),
-    ('136.112.93.84:8787/v1/chat/completions', 'http://136.112.93.84:8787'),
-    ('', 'http://136.112.93.84:8787'),
-    (None, 'http://136.112.93.84:8787'),
+    ('10.0.0.1:8787/v1/chat/completions', 'http://10.0.0.1:8787'),
+    ('', ''),
+    (None, ''),
 ])
 def test_normalize_gateway_url(input_url, expected):
     assert adapter.normalize_gateway_url(input_url) == expected
