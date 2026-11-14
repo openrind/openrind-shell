@@ -206,6 +206,13 @@ export async function writeCurrentSessionMarker(name, value, browserGrant, brows
       lines.push(`export OPENAI_API_KEY=${shellQuote(oai)}`);
       lines.push(`export CODEX_API_KEY=${shellQuote(oai)}`);
     }
+    if (apiKey.haloopGatewayUrl) {
+      lines.push(`export HALOOP_GATEWAY_URL=${shellQuote(apiKey.haloopGatewayUrl)}`);
+    }
+    if (apiKey.w8AdminToken) {
+      lines.push(`export ADMIN_TOKEN=${shellQuote(apiKey.w8AdminToken)}`);
+      lines.push(`export W8_BYOH_ADMIN_TOKEN=${shellQuote(apiKey.w8AdminToken)}`);
+    }
     if (lines.length > 0) {
       writeApiKey = `printf '${lines.join("\\n")}\\n' > /var/lib/openrind-shell/runtime/api-key.env; chmod 600 /var/lib/openrind-shell/runtime/api-key.env;`;
     }
