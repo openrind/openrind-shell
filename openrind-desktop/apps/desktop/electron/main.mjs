@@ -3656,11 +3656,14 @@ async function handleDesktopInvoke(event, command, ...args) {
         const headers = adminToken
           ? { Authorization: `Bearer ${adminToken}`, "X-Admin-Token": adminToken }
           : undefined;
-        const res = await fetch(fullUrl, { headers, signal: AbortSignal.timeout(30000) });
+        const res = await fetch(fullUrl, { headers, signal: AbortSignal.timeout(60000) });
         if (!res.ok) throw new Error(`Collector ${endpointPath} returned HTTP ${res.status}`);
         return await res.json();
       } catch (err) {
-        throw new Error(err instanceof Error ? err.message : String(err));
+        const detail = (err && typeof err === "object" && "cause" in err && err.cause)
+          ? `${err.message} (${err.cause})`
+          : (err instanceof Error ? err.message : String(err));
+        throw new Error(`Collector fetch failed for ${endpointPath}: ${detail}`);
       }
     }
     case "demonstrationStart": {

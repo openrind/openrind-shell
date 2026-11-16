@@ -9,7 +9,6 @@ import {
   ChevronDown,
   Clock,
   Coins,
-  ExternalLink,
   Folder,
   Image as ImageIcon,
   Layers,
@@ -175,7 +174,7 @@ export function HaloopAnalyticsView(props: HaloopAnalyticsViewProps) {
         }
       }
       const fullUrl = `${collectorUrl}${path.startsWith("/") ? "" : "/"}${path}`;
-      const res = await fetch(fullUrl, { signal: AbortSignal.timeout(30000) });
+      const res = await fetch(fullUrl, { signal: AbortSignal.timeout(60000) });
       if (!res.ok) throw new Error(`Collector ${path} returned HTTP ${res.status}`);
       return await res.json();
     },
@@ -196,8 +195,8 @@ export function HaloopAnalyticsView(props: HaloopAnalyticsViewProps) {
       try {
         const q = projectToFetch ? `?project=${encodeURIComponent(projectToFetch)}` : "";
         const statsPromise = fetchCollector(`/stats${q}`);
-        // Fetch up to 35 spans to avoid massive multi-megabyte payload aborts while providing complete turn-by-turn progression
-        const tracesPromise = fetchCollector(`/traces${q ? `${q}&` : "?"}limit=35`);
+        // Fetch up to 20 summary spans to eliminate multi-megabyte payload transfer latency while rendering full turn-by-turn charts
+        const tracesPromise = fetchCollector(`/traces${q ? `${q}&` : "?"}limit=20&summary=true`);
 
         const [statsResult, tracesResult] = await Promise.allSettled([statsPromise, tracesPromise]);
 
@@ -295,18 +294,6 @@ export function HaloopAnalyticsView(props: HaloopAnalyticsViewProps) {
     }
     setEditingCollector(false);
   };
-
-  const webPlatformUrl = useMemo(() => {
-    if (!collectorUrl) return "";
-    try {
-      const u = new URL(collectorUrl);
-      u.port = "3000";
-      u.pathname = "/";
-      return u.origin;
-    } catch {
-      return "";
-    }
-  }, [collectorUrl]);
 
   // Filtered projects for the search dropdown
   const filteredProjects = useMemo(() => {
@@ -762,7 +749,6 @@ export function HaloopAnalyticsView(props: HaloopAnalyticsViewProps) {
         <div className={`${settingsPanelClass} space-y-3`}>
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-gray-12">Model Token Usage & Published Pricing</h3>
-            <span className="text-[11px] text-gray-9">Retail API Rates Reference</span>
           </div>
 
           <div className="overflow-x-auto">
@@ -807,19 +793,6 @@ export function HaloopAnalyticsView(props: HaloopAnalyticsViewProps) {
               Showing real execution spans, prompt contents, and latency from {collectorUrl}
             </p>
           </div>
-          {webPlatformUrl && (
-            <Button
-              variant="outline"
-              className="h-8 rounded-full px-3 text-xs"
-              onClick={() => {
-                if (typeof window !== "undefined") {
-                  window.open(webPlatformUrl, "_blank");
-                }
-              }}
-            >
-              <ExternalLink size={12} className="mr-1.5" /> Open Web Platform
-            </Button>
-          )}
         </div>
 
         {traces.length === 0 ? (
