@@ -210,6 +210,19 @@ export async function writeCurrentSessionMarker(name, value, browserGrant, brows
     if (apiKey.haloopGatewayUrl) {
       lines.push(`export HALOOP_GATEWAY_URL=${shellQuote(apiKey.haloopGatewayUrl)}`);
       lines.push(`export W8_GATEWAY_URL=${shellQuote(apiKey.haloopGatewayUrl)}`);
+      let col = apiKey.haloopCollectorUrl;
+      if (!col) {
+        try {
+          const u = new URL(apiKey.haloopGatewayUrl);
+          u.port = "8788";
+          u.pathname = "";
+          col = u.origin;
+        } catch {}
+      }
+      if (col) {
+        lines.push(`export HALOOP_COLLECTOR_URL=${shellQuote(col)}`);
+        lines.push(`export W8_COLLECTOR_URL=${shellQuote(col)}`);
+      }
     }
     if (apiKey.w8AdminToken) {
       lines.push(`export ADMIN_TOKEN=${shellQuote(apiKey.w8AdminToken)}`);
