@@ -19,12 +19,17 @@ AUTHORIZED_GATEWAY_HOSTS = ('host.openshell.internal', '127.0.0.1', 'localhost',
 
 
 def normalize_gateway_url(url_str):
-    if not url_str or not str(url_str).strip():
+    if not url_str or not str(url_str).strip() or str(url_str).strip() in ('/v1', '/'):
         return 'http://host.openshell.internal:8787'
-    raw = str(url_str).strip()
-    if not (raw.startswith('http://') or raw.startswith('https://')):
-        raw = 'http://' + raw
-    parsed = urlparse(raw)
+    s = str(url_str).strip()
+    is_https = s.lower().startswith('https')
+    cleaned = re.sub(r'^(?:https?:/*)+', '', s)
+    scheme = 'https' if is_https else 'http'
+    raw = f'{scheme}://{cleaned}'
+    try:
+        parsed = urlparse(raw)
+    except Exception:
+        return 'http://host.openshell.internal:8787'
     path = parsed.path
     for suffix in ('/v1/chat/completions', '/chat/completions', '/v1/messages/count_tokens', '/v1/messages', '/v1'):
         if path.endswith(suffix):
@@ -60,7 +65,10 @@ def install_session_transport(context, base_url=None):
     target_url = base_url or BASE_URL
     parsed_base = urlparse(target_url)
     target_host = parsed_base.hostname
-    target_port = parsed_base.port
+    try:
+        target_port = parsed_base.port
+    except ValueError:
+        target_port = 8787
 
     def scoped(request):
         request.headers.pop('x-openrind-haloop-session', None)
