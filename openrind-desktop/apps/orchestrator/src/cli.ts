@@ -2145,7 +2145,8 @@ async function resolveOpencodeDownload(
       const psQuote = (value: string) => `'${value.replace(/'/g, "''")}'`;
       const psScript = [
         "$ErrorActionPreference = 'Stop'",
-        `Expand-Archive -Path ${psQuote(archivePath)} -DestinationPath ${psQuote(extractDir)} -Force`,
+        `Add-Type -AssemblyName System.IO.Compression.FileSystem`,
+        `try { [System.IO.Compression.ZipFile]::ExtractToDirectory(${psQuote(archivePath)}, ${psQuote(extractDir)}) } catch { Expand-Archive -Path ${psQuote(archivePath)} -DestinationPath ${psQuote(extractDir)} }`,
       ].join("; ");
       await runCommand("powershell", ["-NoProfile", "-Command", psScript]);
     } else if (asset.endsWith(".zip")) {

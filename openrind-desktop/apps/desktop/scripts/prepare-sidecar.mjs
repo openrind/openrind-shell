@@ -464,7 +464,8 @@ if (shouldDownloadOpencode) {
     const psScript = [
       "$ErrorActionPreference = 'Stop'",
       `Invoke-WebRequest -UseBasicParsing -Uri ${psQuote(opencodeUrl)} -OutFile ${psQuote(archivePath)}`,
-      `Expand-Archive -Path ${psQuote(archivePath)} -DestinationPath ${psQuote(extractDir)} -Force`,
+      `Add-Type -AssemblyName System.IO.Compression.FileSystem`,
+      `try { [System.IO.Compression.ZipFile]::ExtractToDirectory(${psQuote(archivePath)}, ${psQuote(extractDir)}) } catch { Expand-Archive -Path ${psQuote(archivePath)} -DestinationPath ${psQuote(extractDir)} }`,
     ].join("; ");
 
     const result = spawnSync("powershell", ["-NoProfile", "-Command", psScript], {

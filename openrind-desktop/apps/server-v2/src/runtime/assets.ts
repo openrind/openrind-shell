@@ -201,7 +201,7 @@ async function extractOpencodeArchive(archivePath: string, extractDir: string) {
       "powershell",
       "-NoProfile",
       "-Command",
-      `$ErrorActionPreference = 'Stop'; Expand-Archive -Path ${quotedArchive} -DestinationPath ${quotedExtract} -Force`,
+      `$ErrorActionPreference = 'Stop'; Add-Type -AssemblyName System.IO.Compression.FileSystem; try { [System.IO.Compression.ZipFile]::ExtractToDirectory(${quotedArchive}, ${quotedExtract}) } catch { Expand-Archive -Path ${quotedArchive} -DestinationPath ${quotedExtract} }`,
     ]);
     return;
   }
