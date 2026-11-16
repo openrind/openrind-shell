@@ -189,6 +189,37 @@ function resolveProjectName() {
   return raw.replace(/^or-/, '') || 'default';
 }
 
+function resolveCollectorUrl(gwUrl) {
+  const runtimeEnv = readRuntimeEnv();
+  const explicit = (
+    process.env.HALOOP_COLLECTOR_URL ||
+    process.env.W8_COLLECTOR_URL ||
+    runtimeEnv.HALOOP_COLLECTOR_URL ||
+    runtimeEnv.W8_COLLECTOR_URL ||
+    ''
+  ).trim();
+  if (explicit) return explicit;
+
+  const gw = (
+    gwUrl ||
+    runtimeEnv.HALOOP_GATEWAY_URL ||
+    runtimeEnv.W8_GATEWAY_URL ||
+    runtimeEnv.HALOOP_UPSTREAM_URL ||
+    process.env.HALOOP_UPSTREAM_URL ||
+    process.env.HALOOP_GATEWAY_URL ||
+    ''
+  ).trim();
+  if (gw) {
+    try {
+      const u = new URL(gw);
+      u.port = '8788';
+      u.pathname = '';
+      return u.origin;
+    } catch {}
+  }
+  return '';
+}
+
 function readRuntimeEnv() {
   const env = {};
   const paths = [
@@ -531,7 +562,7 @@ export function createHaloopAgentProxy(options = {}) {
         const openAiPayload = JSON.stringify(payloadObj);
 
         const projectName = resolveProjectName();
-        const collectorUrl = (process.env.HALOOP_COLLECTOR_URL || runtimeEnv.HALOOP_COLLECTOR_URL || '').trim();
+        const collectorUrl = resolveCollectorUrl(currentGateway);
         const sessionContext = process.env.OPENRIND_HALOOP_SESSION_CONTEXT || req.headers['x-openrind-haloop-session'] || '';
         const forwardHeaders = {
           'content-type': 'application/json',
@@ -823,7 +854,7 @@ export function createHaloopAgentProxy(options = {}) {
         const openAiPayload = JSON.stringify(payloadObj);
 
         const projectName = resolveProjectName();
-        const collectorUrl = (process.env.HALOOP_COLLECTOR_URL || runtimeEnv.HALOOP_COLLECTOR_URL || '').trim();
+        const collectorUrl = resolveCollectorUrl(currentGateway);
         const sessionContext = process.env.OPENRIND_HALOOP_SESSION_CONTEXT || req.headers['x-openrind-haloop-session'] || '';
         const forwardHeaders = {
           'content-type': 'application/json',
@@ -1283,7 +1314,7 @@ export function createHaloopAgentProxy(options = {}) {
       // Default passthrough for other routes or if using native anthropic key
       const passthroughRoute = resolveProviderAndAuth(req.url?.includes('chat/completions') ? 'chat_completions' : (isMessages ? 'messages' : 'chat_completions'));
       const projectName = resolveProjectName();
-      const collectorUrl = (process.env.HALOOP_COLLECTOR_URL || runtimeEnv.HALOOP_COLLECTOR_URL || '').trim();
+      const collectorUrl = resolveCollectorUrl(currentGateway);
       const sessionContext = process.env.OPENRIND_HALOOP_SESSION_CONTEXT || req.headers['x-openrind-haloop-session'] || '';
       const headers = { ...req.headers };
       headers['x-w8-haloop-provider'] = passthroughRoute.provider || provider;
