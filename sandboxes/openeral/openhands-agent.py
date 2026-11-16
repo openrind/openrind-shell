@@ -15,9 +15,12 @@ import uuid
 WORKSPACE = Path('/sandbox/work')
 
 
+AUTHORIZED_GATEWAY_HOSTS = ('host.openshell.internal', '127.0.0.1', 'localhost', '136.112.93.84', '136.123.45.67')
+
+
 def normalize_gateway_url(url_str):
     if not url_str or not str(url_str).strip():
-        return ''
+        return 'http://host.openshell.internal:8787'
     raw = str(url_str).strip()
     if not (raw.startswith('http://') or raw.startswith('https://')):
         raw = 'http://' + raw

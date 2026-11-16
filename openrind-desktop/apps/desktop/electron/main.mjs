@@ -3653,11 +3653,9 @@ async function handleDesktopInvoke(event, command, ...args) {
       const fullUrl = `${targetBase}${endpointPath.startsWith("/") ? "" : "/"}${endpointPath}`;
       const adminToken = (await openrindCredentials.getCredential("w8AdminToken").catch(() => null)) || process.env.ADMIN_TOKEN?.trim() || "";
       try {
-        const headers = {};
-        if (adminToken) {
-          headers["Authorization"] = `Bearer ${adminToken}`;
-          headers["X-Admin-Token"] = adminToken;
-        }
+        const headers = adminToken
+          ? { Authorization: `Bearer ${adminToken}`, "X-Admin-Token": adminToken }
+          : undefined;
         const res = await fetch(fullUrl, { headers, signal: AbortSignal.timeout(30000) });
         if (!res.ok) throw new Error(`Collector ${endpointPath} returned HTTP ${res.status}`);
         return await res.json();
@@ -3687,11 +3685,9 @@ async function handleDesktopInvoke(event, command, ...args) {
               return;
             }
             const adminToken = (await openrindCredentials.getCredential("w8AdminToken").catch(() => null)) || process.env.ADMIN_TOKEN?.trim() || "";
-            const authHeaders = {};
-            if (adminToken) {
-              authHeaders["Authorization"] = `Bearer ${adminToken}`;
-              authHeaders["X-Admin-Token"] = adminToken;
-            }
+            const authHeaders = adminToken
+              ? { Authorization: `Bearer ${adminToken}`, "X-Admin-Token": adminToken }
+              : {};
 
             const spansBatch = [];
             for (const record of bundle.records) {

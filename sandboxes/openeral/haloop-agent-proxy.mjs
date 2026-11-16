@@ -376,7 +376,6 @@ export function createHaloopAgentProxy(options = {}) {
       const isResponses = req.url === '/v1/responses' || req.url?.startsWith('/v1/responses') || req.url === '/responses';
       const isStream = Boolean(body?.stream);
 
-      const runtimeEnv = readRuntimeEnv();
       const openRouterKey = (options.openRouterKey || process.env.OPENROUTER_API_KEY || runtimeEnv.OPENROUTER_API_KEY || '').trim();
       const anthropicKey = (options.anthropicKey || process.env.ANTHROPIC_API_KEY || runtimeEnv.ANTHROPIC_API_KEY || '').trim();
       const openAiKey = (options.openAiKey || process.env.OPENAI_API_KEY || runtimeEnv.OPENAI_API_KEY || process.env.CODEX_API_KEY || runtimeEnv.CODEX_API_KEY || '').trim();
