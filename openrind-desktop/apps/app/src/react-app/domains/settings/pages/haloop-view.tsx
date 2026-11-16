@@ -265,7 +265,15 @@ export function HaloopView(props: HaloopViewProps) {
             className="h-8 shrink-0 rounded-full px-3 text-xs"
             onClick={() => {
               if (typeof window !== "undefined") {
-                window.open("http://136.112.93.84:3000/", "_blank");
+                const customCollector = window.localStorage.getItem("openrind_haloop_collector_url");
+                if (customCollector) {
+                  try {
+                    const u = new URL(customCollector);
+                    u.port = "3000";
+                    u.pathname = "/";
+                    window.open(u.origin, "_blank");
+                  } catch {}
+                }
               }
             }}
           >

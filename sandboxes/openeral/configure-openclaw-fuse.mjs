@@ -14,7 +14,7 @@ import JSON5 from "json5";
 const OPENCLAW_HOME = "/sandbox/openclaw-home";
 const WORKSPACE = "/sandbox/work";
 const PROVIDER_ID = "openrind-gateway";
-const DEFAULT_GATEWAY_URL = "http://136.112.93.84:8787";
+const DEFAULT_GATEWAY_URL = "";
 const PROVIDER_BASE_URL =
   process.env.OPENRIND_GATEWAY_BASE_URL ||
   "http://127.0.0.1:8785";

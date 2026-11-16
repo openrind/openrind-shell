@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 
 import { exportHarborDatasetToZip } from "./harbor-exporter.mjs";
 import {
+  getCredential,
   registerHaloopClientProfile,
   resolveHaloopClientProfileIdentity,
   revokeAllHaloopClientProfiles,
@@ -30,15 +31,19 @@ export const HALOOP_EDGE_PORT = 8787;
 export const HALOOP_SANDBOX_ENDPOINT =
   process.env.HALOOP_GATEWAY_URL?.trim() ||
   process.env.OPENRIND_DESKTOP_HALOOP_ENDPOINT?.trim() ||
-  `http://136.112.93.84:${HALOOP_EDGE_PORT}`;
+  (process.argv.some(arg => arg.includes("test")) || process.env.NODE_ENV === "test" ? `http://127.0.0.1:${HALOOP_EDGE_PORT}` : "");
 export const HALOOP_ROUTE_POLICY = "incumbent-only";
 
-export function isRemoteGateway() {
+export function isRemoteGateway(customEndpoint) {
   if (process.argv.some(arg => arg.includes("test")) || process.env.NODE_ENV === "test") {
     return false;
   }
+  const ep = customEndpoint || HALOOP_SANDBOX_ENDPOINT;
+  if (!ep) {
+    return false;
+  }
   try {
-    const url = new URL(HALOOP_SANDBOX_ENDPOINT);
+    const url = new URL(ep);
     const host = url.hostname;
     return host !== "127.0.0.1" && host !== "localhost" && host !== "host.openshell.internal";
   } catch {
@@ -1760,13 +1765,25 @@ export function createHaloopRuntimeManager({
   }
 
   async function ensureOperation(options = {}) {
+      const isTestEnv = process.argv.some(arg => arg.includes("test")) || process.env.NODE_ENV === "test";
+      const activeEndpoint = (await getCredential("haloopGatewayUrl").catch(() => null))?.trim() || process.env.HALOOP_GATEWAY_URL?.trim() || "";
+
+      if (!activeEndpoint && !isTestEnv) {
+        throw new Error("HALOOP_GATEWAY_URL is not configured. Please enter your gateway URL in Settings -> Environment before launching a session.");
+      }
+
       const upstream = resolveHaloopUpstream(options.anthropicApiKey, env);
       await ensureDistro();
       options.onProgress?.({
         phase: "haloop",
         message: "Checking the required Haloop inference edge…",
       });
-      const images = await requireHaloopImages(run);
+
+      let images = null;
+      if (isTestEnv && !activeEndpoint) {
+        images = await requireHaloopImages(run);
+      }
+
       const registration = await registerProfile({
         deferCommit: true,
         sandboxName: options.sandboxName,
@@ -1777,10 +1794,10 @@ export function createHaloopRuntimeManager({
         throw new Error("The scoped Haloop client profile could not be registered.");
       }
 
-      if (isRemoteGateway()) {
+      if (activeEndpoint && (isRemoteGateway(activeEndpoint) || !isTestEnv)) {
         options.onProgress?.({
           phase: "haloop",
-          message: "Connecting to the deployed remote Haloop inference edge…",
+          message: `Connecting to the deployed remote Haloop inference edge at ${activeEndpoint}…`,
         });
         const conversation = options.issueConversation === true
           ? issueHaloopConversationContext(registration.current, {
@@ -1803,7 +1820,7 @@ export function createHaloopRuntimeManager({
         lastAnalysisProject = (options.sandboxName && String(options.sandboxName).trim()) || haloopProjectForWorkspace(options.workspaceId);
         lastConnectionError = null;
         return {
-          endpoint: HALOOP_SANDBOX_ENDPOINT,
+          endpoint: activeEndpoint,
           routePolicy: HALOOP_ROUTE_POLICY,
           providerName: registration.current.providerName,
           clientToken: registration.current.clientToken,
@@ -1819,6 +1836,10 @@ export function createHaloopRuntimeManager({
               }
             : {}),
         };
+      }
+
+      if (!images) {
+        images = await requireHaloopImages(run);
       }
 
       const document = buildHaloopProfilesDocument(registration.profiles, options.anthropicApiKey, {
@@ -1950,8 +1971,10 @@ export function createHaloopRuntimeManager({
             ? `Haloop ${images.gateway.version} is healthy on the temporary OpenRouter test upstream.`
             : `Haloop ${images.gateway.version} routing and private trace capture are healthy.`,
         });
+        const isTestEnv = process.argv.some(arg => arg.includes("test")) || process.env.NODE_ENV === "test";
+        const activeEndpoint = (await getCredential("haloopGatewayUrl").catch(() => null))?.trim() || process.env.HALOOP_GATEWAY_URL?.trim() || (isTestEnv ? HALOOP_SANDBOX_ENDPOINT : "");
         const result = {
-          endpoint: HALOOP_SANDBOX_ENDPOINT,
+          endpoint: activeEndpoint,
           routePolicy: HALOOP_ROUTE_POLICY,
           providerName: registration.current.providerName,
           clientToken: registration.current.clientToken,
@@ -2050,7 +2073,9 @@ export function createHaloopRuntimeManager({
                 agentId: lastReadyRoute.agentId,
               }
             : null,
-          detail: "Using the remotely deployed Haloop gateway at 136.112.93.84.",
+          detail: HALOOP_SANDBOX_ENDPOINT
+            ? `Using the configured Haloop gateway at ${HALOOP_SANDBOX_ENDPOINT}.`
+            : "No Haloop gateway configured.",
           lastConnectionError: null,
           spanCapture: { ...captureStatus },
           checkedAt,

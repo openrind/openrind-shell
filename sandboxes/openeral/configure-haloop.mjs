@@ -13,11 +13,11 @@ import { dirname, join } from "node:path";
 export const HALOOP_UPSTREAM_GATEWAY_URL =
   process.env.HALOOP_UPSTREAM_GATEWAY_URL ||
   process.env.HALOOP_GATEWAY_URL ||
-  "http://136.112.93.84:8787";
+  "";
 export const HALOOP_ANTHROPIC_BASE_URL =
   process.env.HALOOP_ANTHROPIC_BASE_URL ||
   process.env.HALOOP_GATEWAY_URL ||
-  "http://136.112.93.84:8787";
+  "";
 
 const workspaceHome =
   process.env.OPENRIND_SHELL_HOME ||
@@ -87,7 +87,11 @@ function configureSettings(settingsPath) {
     !Array.isArray(settings.env)
       ? settings.env
       : {};
-  settings.env.ANTHROPIC_BASE_URL = HALOOP_ANTHROPIC_BASE_URL;
+  if (HALOOP_ANTHROPIC_BASE_URL) {
+    settings.env.ANTHROPIC_BASE_URL = HALOOP_ANTHROPIC_BASE_URL;
+  } else {
+    delete settings.env.ANTHROPIC_BASE_URL;
+  }
 
   // OpenShell supplies the scoped client credential at request time. Never
   // persist either that token or an upstream provider key in agent state.
@@ -125,16 +129,20 @@ function main() {
     configureClaudeHome();
   }
 
-  mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
-  writeFileSync(baseUrlPath, `${HALOOP_ANTHROPIC_BASE_URL}\n`, {
-    mode: 0o600,
-  });
-  chmodSync(baseUrlPath, 0o600);
-  persistShellExport(
-    shellEnvPath,
-    "ANTHROPIC_BASE_URL",
-    HALOOP_ANTHROPIC_BASE_URL,
-  );
+  if (HALOOP_ANTHROPIC_BASE_URL) {
+    mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
+    writeFileSync(baseUrlPath, `${HALOOP_ANTHROPIC_BASE_URL}\n`, {
+      mode: 0o600,
+    });
+    chmodSync(baseUrlPath, 0o600);
+    persistShellExport(
+      shellEnvPath,
+      "ANTHROPIC_BASE_URL",
+      HALOOP_ANTHROPIC_BASE_URL,
+    );
+  } else {
+    rmSync(baseUrlPath, { force: true });
+  }
 
   // Remove obsolete presign state so a resumed session cannot silently route
   // around Haloop through the retired gateway path.

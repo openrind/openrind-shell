@@ -99,6 +99,8 @@ network_policies:
           - allow: { method: POST, path: "/v1/messages/count_tokens" }
           - allow: { method: POST, path: "/v1/chat/completions" }
           - allow: { method: POST, path: "/chat/completions" }
+          - allow: { method: POST, path: "/v1/responses" }
+          - allow: { method: GET, path: "/v1/models" }
           - allow: { method: GET, path: "/health" }
           - allow: { method: GET, path: "/healthz" }
       - host: 136.112.93.84
@@ -141,17 +143,6 @@ network_policies:
   haloop_agent_proxy:
     name: haloop-agent-proxy
     endpoints:
-      - host: 136.112.93.84
-        port: 8787
-        protocol: rest
-        enforcement: enforce
-        rules:
-          - allow: { method: POST, path: "/v1/messages" }
-          - allow: { method: POST, path: "/v1/messages/count_tokens" }
-          - allow: { method: POST, path: "/v1/chat/completions" }
-          - allow: { method: POST, path: "/chat/completions" }
-          - allow: { method: GET, path: "/health" }
-          - allow: { method: GET, path: "/healthz" }
       - host: host.openshell.internal
         port: 8787
         protocol: rest
@@ -161,6 +152,30 @@ network_policies:
           - allow: { method: POST, path: "/v1/messages/count_tokens" }
           - allow: { method: POST, path: "/v1/chat/completions" }
           - allow: { method: POST, path: "/chat/completions" }
+      - host: 136.112.93.84
+        port: 8787
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow: { method: POST, path: "/v1/messages" }
+          - allow: { method: POST, path: "/v1/messages/count_tokens" }
+          - allow: { method: POST, path: "/v1/chat/completions" }
+          - allow: { method: POST, path: "/chat/completions" }
+          - allow: { method: POST, path: "/v1/responses" }
+          - allow: { method: GET, path: "/v1/models" }
+          - allow: { method: GET, path: "/health" }
+          - allow: { method: GET, path: "/healthz" }
+      - host: 136.112.93.84
+        port: 8788
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow: { method: POST, path: "/v1/messages" }
+          - allow: { method: POST, path: "/v1/messages/count_tokens" }
+          - allow: { method: POST, path: "/v1/chat/completions" }
+          - allow: { method: POST, path: "/chat/completions" }
+          - allow: { method: GET, path: "/health" }
+          - allow: { method: GET, path: "/healthz" }
       - host: openrouter.ai
         port: 443
       - host: api.openai.com

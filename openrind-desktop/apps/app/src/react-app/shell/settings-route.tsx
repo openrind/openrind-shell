@@ -1223,8 +1223,7 @@ export function SettingsRoute() {
         return (
           <HaloopAnalyticsView
             collectorUrl={
-              (typeof process !== "undefined" && process.env.HALOOP_COLLECTOR_URL) ||
-              "http://136.112.93.84:8788"
+              (typeof process !== "undefined" && process.env.HALOOP_COLLECTOR_URL) || ""
             }
             status={openshellState.haloopStatus}
             onRefreshRuntime={openshellState.refreshHaloopStatus}

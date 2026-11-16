@@ -75,14 +75,6 @@ const PREDEFINED_CREDENTIALS: PredefinedCredentialDef[] = [
     placeholder: "sk-or-v1-...",
   },
   {
-    statusKey: "codexApiKey",
-    envVarName: "CODEX_API_KEY",
-    label: "CODEX_API_KEY",
-    description:
-      "Optional override: Dedicated OpenAI key for Codex CLI (if unset, Codex automatically uses the primary OPENAI_API_KEY or OPENROUTER_API_KEY).",
-    placeholder: "sk-...",
-  },
-  {
     statusKey: "openaiApiKey",
     envVarName: "OPENAI_API_KEY",
     label: "OPENAI_API_KEY",
@@ -93,18 +85,18 @@ const PREDEFINED_CREDENTIALS: PredefinedCredentialDef[] = [
   {
     statusKey: "haloopGatewayUrl",
     envVarName: "HALOOP_GATEWAY_URL",
-    label: "HALOOP_GATEWAY_URL",
+    label: "HALOOP_GATEWAY_URL / W8_GATEWAY_URL",
     description:
-      "Gateway proxy edge URL for w8-haloop (defaults to http://136.112.93.84:8787 or http://127.0.0.1:8787).",
-    placeholder: "http://127.0.0.1:8787",
+      "Gateway proxy edge URL for w8-haloop (e.g. http://<your-server-ip>:8787). Leave blank until configured.",
+    placeholder: "http://<gateway-host>:8787",
   },
   {
     statusKey: "w8AdminToken",
     envVarName: "ADMIN_TOKEN",
-    label: "ADMIN_TOKEN",
+    label: "ADMIN_TOKEN / W8_ADMIN_TOKEN",
     description:
-      "Admin authorization token for w8-haloop collector, BYOH rollouts, and secure operations.",
-    placeholder: "w8-catalog-simulation-admin",
+      "Admin authorization token for w8-haloop collector, BYOH rollouts, and secure project operations.",
+    placeholder: "admin-token-...",
   },
   {
     statusKey: "openrindGatewayApiKey",
@@ -345,16 +337,27 @@ export function EnvironmentView(props: EnvironmentViewProps) {
       return;
     }
 
-    // Check if key matches a predefined credential
-    const matchedPredefined = PREDEFINED_CREDENTIALS.find(
-      (p) => p.envVarName.toUpperCase() === trimmedKey.toUpperCase(),
-    );
+    // Check if key matches a predefined credential or alias
+    let targetStatusKey: OpenrindShellCredentialKey | null = null;
+    const upperKey = trimmedKey.toUpperCase();
+    if (upperKey === "CODEX_API_KEY") {
+      targetStatusKey = "openaiApiKey";
+    } else if (upperKey === "W8_GATEWAY_URL" || upperKey === "GATEWAY_URL" || upperKey === "HALOOP_GATEWAY_URL") {
+      targetStatusKey = "haloopGatewayUrl";
+    } else if (upperKey === "W8_ADMIN_TOKEN" || upperKey === "W8_BYOH_ADMIN_TOKEN" || upperKey === "ADMIN_TOKEN") {
+      targetStatusKey = "w8AdminToken";
+    } else {
+      const matchedPredefined = PREDEFINED_CREDENTIALS.find(
+        (p) => p.envVarName.toUpperCase() === upperKey,
+      );
+      if (matchedPredefined) targetStatusKey = matchedPredefined.statusKey;
+    }
 
-    if (matchedPredefined && props.onSetCredential) {
+    if (targetStatusKey && props.onSetCredential) {
       setSavingAdd(true);
       setAddError(null);
       try {
-        await props.onSetCredential(matchedPredefined.statusKey, newValue);
+        await props.onSetCredential(targetStatusKey, newValue);
         markChangesPending();
         closeAddInline();
       } catch (err) {

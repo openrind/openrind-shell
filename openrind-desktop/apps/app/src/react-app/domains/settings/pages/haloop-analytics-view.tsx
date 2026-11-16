@@ -17,6 +17,7 @@ import {
   Monitor,
   RefreshCw,
   Search,
+  Sliders,
   Sparkles,
   TrendingUp,
   X,
@@ -106,7 +107,18 @@ function formatCost(usd?: number): string {
 }
 
 export function HaloopAnalyticsView(props: HaloopAnalyticsViewProps) {
-  const collectorUrl = (props.collectorUrl || "http://136.112.93.84:8788").replace(/\/+$/, "");
+  const [collectorUrl, setCollectorUrl] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = window.localStorage.getItem("openrind_haloop_collector_url");
+        if (saved && saved.trim()) return saved.trim().replace(/\/+$/, "");
+      } catch {}
+    }
+    return (props.collectorUrl || "").replace(/\/+$/, "");
+  });
+  const [editingCollector, setEditingCollector] = useState(false);
+  const [collectorInput, setCollectorInput] = useState(collectorUrl);
+
   const [stats, setStats] = useState<CollectorStats | null>(null);
   const [traces, setTraces] = useState<TraceSpan[]>([]);
   const [projects, setProjects] = useState<string[]>([]);
@@ -120,7 +132,7 @@ export function HaloopAnalyticsView(props: HaloopAnalyticsViewProps) {
     }
     return "cld";
   });
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewArtifact, setPreviewArtifact] = useState<ArtifactModalData | null>(null);
 
@@ -151,16 +163,19 @@ export function HaloopAnalyticsView(props: HaloopAnalyticsViewProps) {
 
   const fetchCollector = useCallback(
     async (path: string) => {
+      if (!collectorUrl) {
+        throw new Error("Collector URL is not configured. Please enter your collector endpoint above.");
+      }
       const bridge = (window as any).__OPENRIND_DESKTOP_ELECTRON__;
       if (bridge?.invokeDesktop) {
         try {
-          return await bridge.invokeDesktop("openrindFetchCollector", path);
+          return await bridge.invokeDesktop("openrindFetchCollector", path, collectorUrl);
         } catch (err) {
           console.warn("[HaloopAnalyticsView] invokeDesktop fallback to direct fetch:", err);
         }
       }
       const fullUrl = `${collectorUrl}${path.startsWith("/") ? "" : "/"}${path}`;
-      const res = await fetch(fullUrl, { signal: AbortSignal.timeout(6000) });
+      const res = await fetch(fullUrl, { signal: AbortSignal.timeout(30000) });
       if (!res.ok) throw new Error(`Collector ${path} returned HTTP ${res.status}`);
       return await res.json();
     },
@@ -169,13 +184,20 @@ export function HaloopAnalyticsView(props: HaloopAnalyticsViewProps) {
 
   const fetchData = useCallback(
     async (projectToFetch = selectedProject) => {
+      if (!collectorUrl) {
+        setStats(null);
+        setTraces([]);
+        setLoading(false);
+        return;
+      }
       const reqId = ++activeRequestRef.current;
       setLoading(true);
       setError(null);
       try {
         const q = projectToFetch ? `?project=${encodeURIComponent(projectToFetch)}` : "";
         const statsPromise = fetchCollector(`/stats${q}`);
-        const tracesPromise = fetchCollector(`/traces${q ? `${q}&` : "?"}limit=100`);
+        // Fetch up to 35 spans to avoid massive multi-megabyte payload aborts while providing complete turn-by-turn progression
+        const tracesPromise = fetchCollector(`/traces${q ? `${q}&` : "?"}limit=35`);
 
         const [statsResult, tracesResult] = await Promise.allSettled([statsPromise, tracesPromise]);
 
@@ -207,6 +229,10 @@ export function HaloopAnalyticsView(props: HaloopAnalyticsViewProps) {
   );
 
   const fetchProjects = useCallback(async () => {
+    if (!collectorUrl) {
+      setProjects([]);
+      return;
+    }
     try {
       const list = (await fetchCollector("/projects")) as string[];
       if (Array.isArray(list) && list.length > 0) {
@@ -231,16 +257,56 @@ export function HaloopAnalyticsView(props: HaloopAnalyticsViewProps) {
     void fetchData(selectedProject);
   }, [fetchData, selectedProject]);
 
-  const handleSelectProject = (proj: string) => {
-    setSelectedProject(proj);
-    setProjectDropdownOpen(false);
-    setProjectSearchQuery("");
+  const handleSaveCollectorUrl = () => {
+    const trimmed = collectorInput.trim().replace(/\/+$/, "");
+    if (!trimmed) {
+      setCollectorUrl("");
+      if (typeof window !== "undefined") {
+        try {
+          window.localStorage.removeItem("openrind_haloop_collector_url");
+        } catch {}
+      }
+      setEditingCollector(false);
+      return;
+    }
+    try {
+      new URL(trimmed);
+    } catch {
+      setError("Invalid Collector URL (e.g. http://<host>:8788)");
+      return;
+    }
+    setCollectorUrl(trimmed);
     if (typeof window !== "undefined") {
       try {
-        window.localStorage.setItem("openrind_haloop_selected_project", proj);
+        window.localStorage.setItem("openrind_haloop_collector_url", trimmed);
       } catch {}
     }
+    setEditingCollector(false);
   };
+
+  const handleResetCollectorUrl = () => {
+    const fallback = (props.collectorUrl || "").replace(/\/+$/, "");
+    setCollectorUrl(fallback);
+    setCollectorInput(fallback);
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.removeItem("openrind_haloop_collector_url");
+      } catch {}
+    }
+    setEditingCollector(false);
+  };
+
+  const webPlatformUrl = useMemo(() => {
+    if (!collectorUrl) return "";
+    try {
+      const u = new URL(collectorUrl);
+      u.port = "3000";
+      u.pathname = "/";
+      return u.origin;
+    } catch {
+      return "";
+    }
+  }, [collectorUrl]);
 
   // Filtered projects for the search dropdown
   const filteredProjects = useMemo(() => {
@@ -259,9 +325,12 @@ export function HaloopAnalyticsView(props: HaloopAnalyticsViewProps) {
 
     const points = sorted.map((t, idx) => {
       const attrs = t.attributes || {};
-      const latencyMs = Number(attrs["w8.latency_ms"] || 0);
-      const promptTok = Number(attrs["llm.token_count.prompt"] || attrs["inference.llm.input_tokens"] || 0);
-      const compTok = Number(attrs["llm.token_count.completion"] || attrs["inference.llm.output_tokens"] || 0);
+      const calculatedLatency = (t.start_time && t.end_time)
+        ? Math.max(0, new Date(t.end_time).getTime() - new Date(t.start_time).getTime())
+        : 0;
+      const latencyMs = Number(attrs["w8.latency_ms"] || attrs["llm.latency_ms"] || attrs["latency_ms"] || calculatedLatency || 0);
+      const promptTok = Number(attrs["llm.token_count.prompt"] || attrs["inference.llm.input_tokens"] || attrs["llm.usage.prompt_tokens"] || attrs["tokens.prompt"] || 0);
+      const compTok = Number(attrs["llm.token_count.completion"] || attrs["inference.llm.output_tokens"] || attrs["llm.usage.completion_tokens"] || attrs["tokens.completion"] || 0);
       const rawPrompt = attrs["llm.input_messages.0.message.content"] || t.name || `Call #${idx + 1}`;
       const label = typeof rawPrompt === "string" ? (rawPrompt.length > 20 ? rawPrompt.slice(0, 18) + "…" : rawPrompt) : `Call #${idx + 1}`;
 
@@ -299,10 +368,21 @@ export function HaloopAnalyticsView(props: HaloopAnalyticsViewProps) {
 
   // Real Average latency
   const avgLatency = useMemo(() => {
-    const latencies = traces.map(t => Number(t.attributes?.["w8.latency_ms"] || 0)).filter(l => l > 0);
+    const latencies = telemetryProgression.map((p) => p.latencyMs).filter((l) => l > 0);
     if (latencies.length === 0) return 0;
     return Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length);
-  }, [traces]);
+  }, [telemetryProgression]);
+
+  const handleSelectProject = (proj: string) => {
+    setSelectedProject(proj);
+    setProjectDropdownOpen(false);
+    setProjectSearchQuery("");
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem("openrind_haloop_selected_project", proj);
+      } catch {}
+    }
+  };
 
   return (
     <div className="space-y-6 text-gray-12">
@@ -314,10 +394,35 @@ export function HaloopAnalyticsView(props: HaloopAnalyticsViewProps) {
               <h2 className="text-lg font-semibold tracking-tight text-gray-12">
                 What your agents did
               </h2>
-              <span className="flex items-center gap-1.5 rounded-full border border-green-7/50 bg-green-3/30 px-2.5 py-0.5 text-[11px] font-medium text-green-11">
-                <span className="h-1.5 w-1.5 rounded-full bg-green-9 animate-pulse" />
-                Live: {collectorUrl.replace(/^https?:\/\//, "")}
-              </span>
+              {collectorUrl ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCollectorInput(collectorUrl);
+                    setEditingCollector((prev) => !prev);
+                  }}
+                  className="flex items-center gap-1.5 rounded-full border border-green-7/50 bg-green-3/30 px-2.5 py-0.5 text-[11px] font-medium text-green-11 transition-colors hover:border-green-6 hover:bg-green-3/50 cursor-pointer"
+                  title="Click to configure Collector URL"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-green-9 animate-pulse" />
+                  Live: {collectorUrl.replace(/^https?:\/\//, "")}
+                  <Sliders size={11} className="ml-0.5 opacity-70" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCollectorInput("");
+                    setEditingCollector(true);
+                  }}
+                  className="flex items-center gap-1.5 rounded-full border border-amber-7/50 bg-amber-3/30 px-2.5 py-0.5 text-[11px] font-medium text-amber-11 transition-colors hover:border-amber-6 hover:bg-amber-3/50 cursor-pointer"
+                  title="Click to configure Collector URL"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-9" />
+                  Not Configured
+                  <Sliders size={11} className="ml-0.5 opacity-70" />
+                </button>
+              )}
             </div>
             <p className="text-xs text-gray-10">
               {totalSessions} sessions · {stats?.spans || traces.length} trace spans · favorite{" "}
@@ -399,6 +504,48 @@ export function HaloopAnalyticsView(props: HaloopAnalyticsViewProps) {
             </Button>
           </div>
         </div>
+
+        {/* Inline Custom Collector URL Editor */}
+        {editingCollector && (
+          <div className="rounded-2xl border border-dls-border bg-dls-subtle/80 p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-gray-12">Configure Collector URL</span>
+              <button
+                type="button"
+                onClick={() => setEditingCollector(false)}
+                className="text-gray-8 hover:text-gray-11"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <p className="text-[11px] text-gray-9">
+              Set the trace collector and observability endpoint for metrics, spans, and artifacts.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="text"
+                value={collectorInput}
+                onChange={(e) => setCollectorInput(e.target.value)}
+                placeholder="http://<your-collector-ip>:8788"
+                className="flex-1 min-w-[240px] rounded-xl border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-gray-12 placeholder-gray-8 outline-none focus:border-purple-8 font-mono"
+              />
+              <Button
+                variant="primary"
+                className="h-8 rounded-xl px-3.5 text-xs"
+                onClick={handleSaveCollectorUrl}
+              >
+                Save
+              </Button>
+              <Button
+                variant="outline"
+                className="h-8 rounded-xl px-3 text-xs"
+                onClick={handleResetCollectorUrl}
+              >
+                Clear
+              </Button>
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="rounded-xl border border-red-7/60 bg-red-3/30 p-3 text-xs text-red-11 flex items-start gap-2">
@@ -660,17 +807,19 @@ export function HaloopAnalyticsView(props: HaloopAnalyticsViewProps) {
               Showing real execution spans, prompt contents, and latency from {collectorUrl}
             </p>
           </div>
-          <Button
-            variant="outline"
-            className="h-8 rounded-full px-3 text-xs"
-            onClick={() => {
-              if (typeof window !== "undefined") {
-                window.open("http://136.112.93.84:3000/", "_blank");
-              }
-            }}
-          >
-            <ExternalLink size={12} className="mr-1.5" /> Open Web Platform
-          </Button>
+          {webPlatformUrl && (
+            <Button
+              variant="outline"
+              className="h-8 rounded-full px-3 text-xs"
+              onClick={() => {
+                if (typeof window !== "undefined") {
+                  window.open(webPlatformUrl, "_blank");
+                }
+              }}
+            >
+              <ExternalLink size={12} className="mr-1.5" /> Open Web Platform
+            </Button>
+          )}
         </div>
 
         {traces.length === 0 ? (
