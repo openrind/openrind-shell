@@ -582,7 +582,7 @@ export class DemonstrationRecorder {
     const scrubbedAction = { ...actionData };
     if (this.activeSession.scrubPii && typeof scrubbedAction.text === "string") {
       const winLower = (activeWin?.title || "").toLowerCase();
-      const isAuthContext = /password|passcode|passphrase|login|sign[ -]?in|\bpin\b|credentials|sudo|authenticate/i.test(winLower);
+      const isAuthContext = /password|passcode|passphrase|log[ -]?in|sign[ -]?in|\bpin\b|credentials|sudo|authenticate/i.test(winLower);
       if (isAuthContext || scrubbedAction.isPassword) {
         scrubbedAction.text = "••••••••";
       } else {

@@ -1459,13 +1459,18 @@ export function createCtfService() {
         ]);
       } else {
         // Custom challenge container: map container backendPort to hostPort
+        const targetPort = task.backendPort || 8080;
         runRes = await runDocker([
           "run",
           "-d",
           "--name",
           containerName,
+          "-e",
+          `PORT=${targetPort}`,
+          "-e",
+          "HOST=0.0.0.0",
           "-p",
-          `${hostPort}:${task.backendPort || 8080}`,
+          `${hostPort}:${targetPort}`,
           imageName,
         ]);
       }
@@ -1596,7 +1601,7 @@ export function createCtfService() {
         // Health Check
         onStatus?.({ phase: "connecting", message: "Connecting to challenge application..." });
         let connected = false;
-        const deadline = Date.now() + 15_000;
+        const deadline = Date.now() + 25_000;
 
         while (Date.now() < deadline) {
           if (activeRunAbort?.signal?.aborted) break;

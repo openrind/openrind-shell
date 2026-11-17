@@ -3700,7 +3700,10 @@ async function handleDesktopInvoke(event, command, ...args) {
               const frameAfter = payload.frame_after || payload.snapshot || {};
               const frameBefore = payload.frame_before || {};
               const artifactId = frameAfter.artifactId || payload.artifactId || frameBefore.artifactId || null;
-              const artifactUrl = frameAfter.artifactUrl || payload.artifactUrl || frameBefore.artifactUrl || null;
+              let artifactUrl = frameAfter.artifactUrl || payload.artifactUrl || frameBefore.artifactUrl || null;
+              if (artifactId && defaultCollector) {
+                artifactUrl = `${defaultCollector.replace(/\/+$/, "")}/artifacts/${artifactId}`;
+              }
 
               spansBatch.push({
                 kind: "AGENT",
