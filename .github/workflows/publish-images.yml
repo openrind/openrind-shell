@@ -5,7 +5,7 @@ on:
     branches:
       - nemo
       - browser-pods
-      - audit/kimi 
+      - audit
     paths:
       - 'Cargo.lock'
       - 'Cargo.toml'
