@@ -176,7 +176,7 @@ export class DemonstrationRecorder {
     this.isCapturing = false;
   }
 
-  async start({ taskTitle, domain = "desktop_gui", captureIntervalMs = 1500, scrubPii = true }) {
+  async start({ taskTitle, domain = "desktop_gui", captureIntervalMs = 1500, scrubPii = true, collectorUrl = "", adminToken = "" }) {
     if (this.activeSession) {
       throw new Error("A demonstration recording is already in progress.");
     }
@@ -213,6 +213,8 @@ export class DemonstrationRecorder {
       framesCount: 0,
       inputEventsCount: 0,
       scrubPii,
+      collectorUrl: (collectorUrl || "").trim(),
+      adminToken: (adminToken || "").trim(),
       isPaused: false,
       captureIntervalMs: Math.max(500, captureIntervalMs),
     };
@@ -490,11 +492,18 @@ export class DemonstrationRecorder {
     );
 
     // Stream image frame artifact immediately to collector in the background if configured
-    const targetArtifactsUrl = process.env.HALOOP_ARTIFACTS_URL?.trim() || (process.env.HALOOP_COLLECTOR_URL ? `${process.env.HALOOP_COLLECTOR_URL.replace(/\/+$/, "")}/artifacts` : "");
+    const collectorBase = (this.activeSession?.collectorUrl || process.env.HALOOP_COLLECTOR_URL || "").trim().replace(/\/+$/, "");
+    const targetArtifactsUrl = collectorBase
+      ? `${collectorBase}/artifacts`
+      : (process.env.HALOOP_ARTIFACTS_URL?.trim() || "");
+    const authHeaders = this.activeSession?.adminToken
+      ? { Authorization: `Bearer ${this.activeSession.adminToken}`, "X-Admin-Token": this.activeSession.adminToken }
+      : {};
+
     if (targetArtifactsUrl) {
       fetch(targetArtifactsUrl, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...authHeaders },
         body: JSON.stringify({
           artifact_id: artifactName,
           sha256: frameHash,
@@ -512,11 +521,10 @@ export class DemonstrationRecorder {
     }
 
     const displayBounds = currentDisplay?.bounds || { x: 0, y: 0, width: targetWidth, height: targetHeight };
-    const baseArtifactUrl = targetArtifactsUrl.replace(/\/+$/, "");
     const framePayload = {
       artifactId: artifactName,
       artifactHash,
-      artifactUrl: `${baseArtifactUrl}/${artifactName}`,
+      artifactUrl: targetArtifactsUrl ? `${targetArtifactsUrl.replace(/\/+$/, "")}/${artifactName}` : `/${artifactName}`,
       sha256: frameHash,
       width: image.getSize().width,
       height: image.getSize().height,
@@ -544,7 +552,7 @@ export class DemonstrationRecorder {
 
     this.activeSession.lastFrame = {
       artifactId: artifactName,
-      artifactUrl: `${baseArtifactUrl}/${artifactName}`,
+      artifactUrl: framePayload.artifactUrl,
       sha256: frameHash,
       width: image.getSize().width,
       height: image.getSize().height,

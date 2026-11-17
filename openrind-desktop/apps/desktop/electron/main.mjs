@@ -3785,7 +3785,23 @@ async function handleDesktopInvoke(event, command, ...args) {
           },
         });
       }
-      const result = await demonstrationRecorder.start(opts);
+      const storedGateway = (await openrindCredentials.getCredential("haloopGatewayUrl").catch(() => null)) || process.env.HALOOP_GATEWAY_URL?.trim();
+      let defaultCollector = "";
+      if (storedGateway) {
+        try {
+          const u = new URL(storedGateway);
+          u.port = "8788";
+          u.pathname = "";
+          defaultCollector = u.origin;
+        } catch {}
+      }
+      const adminToken = (await openrindCredentials.getCredential("w8AdminToken").catch(() => null)) || process.env.ADMIN_TOKEN?.trim() || "";
+
+      const result = await demonstrationRecorder.start({
+        ...opts,
+        collectorUrl: defaultCollector,
+        adminToken,
+      });
       mainWindow?.webContents.send("demonstration-status-change", {
         recording: true,
         session: demonstrationRecorder.activeSession ? {
