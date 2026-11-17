@@ -223,6 +223,9 @@ export async function writeCurrentSessionMarker(name, value, browserGrant, brows
         lines.push(`export HALOOP_COLLECTOR_URL=${shellQuote(col)}`);
         lines.push(`export W8_COLLECTOR_URL=${shellQuote(col)}`);
       }
+    } else if (apiKey.haloopCollectorUrl) {
+      lines.push(`export HALOOP_COLLECTOR_URL=${shellQuote(apiKey.haloopCollectorUrl)}`);
+      lines.push(`export W8_COLLECTOR_URL=${shellQuote(apiKey.haloopCollectorUrl)}`);
     }
     if (apiKey.w8AdminToken) {
       lines.push(`export ADMIN_TOKEN=${shellQuote(apiKey.w8AdminToken)}`);

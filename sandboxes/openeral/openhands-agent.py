@@ -70,6 +70,10 @@ def install_session_transport(context, base_url=None):
     except ValueError:
         target_port = 8787
 
+    authorized_hosts = set(AUTHORIZED_GATEWAY_HOSTS)
+    if target_host:
+        authorized_hosts.add(target_host)
+
     def scoped(request):
         request.headers.pop('x-openrind-haloop-session', None)
         request.headers.pop('x-w8-haloop-provider', None)
@@ -80,7 +84,7 @@ def install_session_transport(context, base_url=None):
         url = request.url
         if url.scheme in ('http', 'https'):
             host_match = (
-                url.host in AUTHORIZED_GATEWAY_HOSTS
+                url.host in authorized_hosts
                 and (not target_host or url.host == target_host)
             )
             port_match = (

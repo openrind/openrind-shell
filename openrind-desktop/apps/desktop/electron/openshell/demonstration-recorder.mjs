@@ -440,7 +440,10 @@ export class DemonstrationRecorder {
     let currentDisplay = null;
     if (!isTestEnv()) {
       try {
-        cursor = this.activeSession.lastCursorPoint || screen?.getCursorScreenPoint?.() || { x: 0, y: 0 };
+        const explicitPoint = (action?.x !== undefined && action?.y !== undefined)
+          ? { x: action.x, y: action.y }
+          : null;
+        cursor = explicitPoint || screen?.getCursorScreenPoint?.() || this.activeSession.lastCursorPoint || { x: 0, y: 0 };
         currentDisplay = screen?.getDisplayNearestPoint?.(cursor) || screen?.getPrimaryDisplay?.();
       } catch {}
     }
@@ -553,8 +556,19 @@ export class DemonstrationRecorder {
     return event;
   }
 
-  async recordInputEvent(actionData) {
-    if (!this.activeSession || this.activeSession.isPaused) return;
+  recordInputEvent(actionData) {
+    if (!this.activeSession || this.activeSession.isPaused) return Promise.resolve(null);
+    this._actionQueue = (this._actionQueue || Promise.resolve()).then(async () => {
+      return this._recordInputEventInternal(actionData);
+    }).catch((err) => {
+      console.warn("[DemonstrationRecorder] Action queue error:", err);
+      return null;
+    });
+    return this._actionQueue;
+  }
+
+  async _recordInputEventInternal(actionData) {
+    if (!this.activeSession || this.activeSession.isPaused) return null;
 
     let activeWin = await getActiveWindow();
     if (this.activeSession.scrubPii && activeWin?.title) {
@@ -564,10 +578,16 @@ export class DemonstrationRecorder {
 
     this.activeSession.inputEventsCount++;
 
-    // 1. Scrub PII on input actions immediately before capture or emission
+    // 1. Scrub PII on input actions immediately before capture or emission (with password masking)
     const scrubbedAction = { ...actionData };
     if (this.activeSession.scrubPii && typeof scrubbedAction.text === "string") {
-      scrubbedAction.text = scrubPiiText(scrubbedAction.text);
+      const winLower = (activeWin?.title || "").toLowerCase();
+      const isAuthContext = /password|passcode|passphrase|login|sign[ -]?in|\bpin\b|credentials|sudo|authenticate/i.test(winLower);
+      if (isAuthContext || scrubbedAction.isPassword) {
+        scrubbedAction.text = "••••••••";
+      } else {
+        scrubbedAction.text = scrubPiiText(scrubbedAction.text);
+      }
     }
 
     // 2. Add settling delay (~100ms) so OS/GPU finishes repainting active window
