@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2, X } from "lucide-react";
 
 import {
@@ -32,7 +32,46 @@ export function ImportTaskModal(props: ImportTaskModalProps) {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (props.open) {
+      setFolderPath("");
+      setName("");
+      setCategory("web");
+      setBackendPort(8080);
+      setFlag("");
+      setDescription("");
+      setError(null);
+      setStatusMessage(null);
+    }
+  }, [props.open]);
+
   if (!props.open) return null;
+
+  const inspectAndPopulate = async (selectedPath: string) => {
+    const trimmed = selectedPath.trim();
+    if (!trimmed) return;
+    try {
+      const invoke = (window as any).__OPENRIND_DESKTOP_ELECTRON__?.invokeDesktop;
+      if (!invoke) return;
+      const meta = await invoke("ctfInspectFolder", trimmed);
+      if (meta) {
+        if (meta.name) setName(meta.name);
+        if (meta.category) setCategory(meta.category);
+        if (meta.backendPort) setBackendPort(meta.backendPort);
+        if (meta.flag) setFlag(meta.flag);
+        if (meta.description) setDescription(meta.description);
+      }
+      if (!meta?.name) {
+        const parts = trimmed.replace(/[\\/]+$/, "").split(/[\\/]/);
+        const folderName = parts[parts.length - 1] || "";
+        if (folderName) setName(folderName);
+      }
+    } catch {
+      const parts = trimmed.replace(/[\\/]+$/, "").split(/[\\/]/);
+      const folderName = parts[parts.length - 1] || "";
+      if (folderName) setName(folderName);
+    }
+  };
 
   const handleBrowseFolder = async () => {
     setError(null);
@@ -42,10 +81,7 @@ export function ImportTaskModal(props: ImportTaskModalProps) {
       const res = await invoke("ctfSelectFolder");
       if (res && !res.canceled && res.path) {
         setFolderPath(res.path);
-        if (!name) {
-          const parts = res.path.replace(/[\\/]+$/, "").split(/[\\/]/);
-          setName(parts[parts.length - 1] || "");
-        }
+        await inspectAndPopulate(res.path);
       }
     } catch (err: any) {
       setError(err?.message || "Failed to select folder.");
@@ -134,7 +170,16 @@ export function ImportTaskModal(props: ImportTaskModalProps) {
                 className={`${inputClass} flex-1 font-mono text-[12px]`}
                 placeholder="Path to challenge directory..."
                 value={folderPath}
-                onChange={(e) => setFolderPath(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setFolderPath(val);
+                  if (val.trim().length > 3) {
+                    inspectAndPopulate(val);
+                  }
+                }}
+                onBlur={() => {
+                  if (folderPath.trim()) inspectAndPopulate(folderPath);
+                }}
                 disabled={busy}
               />
               <button

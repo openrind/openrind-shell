@@ -176,7 +176,7 @@ export class DemonstrationRecorder {
     this.isCapturing = false;
   }
 
-  async start({ taskTitle, domain = "desktop_gui", captureIntervalMs = 1500, scrubPii = true }) {
+  async start({ taskTitle, domain = "desktop_gui", captureIntervalMs = 1500, scrubPii = true, collectorUrl = "", adminToken = "" }) {
     if (this.activeSession) {
       throw new Error("A demonstration recording is already in progress.");
     }
@@ -213,6 +213,8 @@ export class DemonstrationRecorder {
       framesCount: 0,
       inputEventsCount: 0,
       scrubPii,
+      collectorUrl: (collectorUrl || "").trim(),
+      adminToken: (adminToken || "").trim(),
       isPaused: false,
       captureIntervalMs: Math.max(500, captureIntervalMs),
     };
@@ -440,7 +442,10 @@ export class DemonstrationRecorder {
     let currentDisplay = null;
     if (!isTestEnv()) {
       try {
-        cursor = this.activeSession.lastCursorPoint || screen?.getCursorScreenPoint?.() || { x: 0, y: 0 };
+        const explicitPoint = (action?.x !== undefined && action?.y !== undefined)
+          ? { x: action.x, y: action.y }
+          : null;
+        cursor = explicitPoint || screen?.getCursorScreenPoint?.() || this.activeSession.lastCursorPoint || { x: 0, y: 0 };
         currentDisplay = screen?.getDisplayNearestPoint?.(cursor) || screen?.getPrimaryDisplay?.();
       } catch {}
     }
@@ -487,11 +492,18 @@ export class DemonstrationRecorder {
     );
 
     // Stream image frame artifact immediately to collector in the background if configured
-    const targetArtifactsUrl = process.env.HALOOP_ARTIFACTS_URL?.trim() || (process.env.HALOOP_COLLECTOR_URL ? `${process.env.HALOOP_COLLECTOR_URL.replace(/\/+$/, "")}/artifacts` : "");
+    const collectorBase = (this.activeSession?.collectorUrl || process.env.HALOOP_COLLECTOR_URL || "").trim().replace(/\/+$/, "");
+    const targetArtifactsUrl = collectorBase
+      ? `${collectorBase}/artifacts`
+      : (process.env.HALOOP_ARTIFACTS_URL?.trim() || "");
+    const authHeaders = this.activeSession?.adminToken
+      ? { Authorization: `Bearer ${this.activeSession.adminToken}`, "X-Admin-Token": this.activeSession.adminToken }
+      : {};
+
     if (targetArtifactsUrl) {
       fetch(targetArtifactsUrl, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...authHeaders },
         body: JSON.stringify({
           artifact_id: artifactName,
           sha256: frameHash,
@@ -509,11 +521,10 @@ export class DemonstrationRecorder {
     }
 
     const displayBounds = currentDisplay?.bounds || { x: 0, y: 0, width: targetWidth, height: targetHeight };
-    const baseArtifactUrl = targetArtifactsUrl.replace(/\/+$/, "");
     const framePayload = {
       artifactId: artifactName,
       artifactHash,
-      artifactUrl: `${baseArtifactUrl}/${artifactName}`,
+      artifactUrl: targetArtifactsUrl ? `${targetArtifactsUrl.replace(/\/+$/, "")}/${artifactName}` : `/${artifactName}`,
       sha256: frameHash,
       width: image.getSize().width,
       height: image.getSize().height,
@@ -541,7 +552,7 @@ export class DemonstrationRecorder {
 
     this.activeSession.lastFrame = {
       artifactId: artifactName,
-      artifactUrl: `${baseArtifactUrl}/${artifactName}`,
+      artifactUrl: framePayload.artifactUrl,
       sha256: frameHash,
       width: image.getSize().width,
       height: image.getSize().height,
@@ -553,8 +564,19 @@ export class DemonstrationRecorder {
     return event;
   }
 
-  async recordInputEvent(actionData) {
-    if (!this.activeSession || this.activeSession.isPaused) return;
+  recordInputEvent(actionData) {
+    if (!this.activeSession || this.activeSession.isPaused) return Promise.resolve(null);
+    this._actionQueue = (this._actionQueue || Promise.resolve()).then(async () => {
+      return this._recordInputEventInternal(actionData);
+    }).catch((err) => {
+      console.warn("[DemonstrationRecorder] Action queue error:", err);
+      return null;
+    });
+    return this._actionQueue;
+  }
+
+  async _recordInputEventInternal(actionData) {
+    if (!this.activeSession || this.activeSession.isPaused) return null;
 
     let activeWin = await getActiveWindow();
     if (this.activeSession.scrubPii && activeWin?.title) {
@@ -564,10 +586,16 @@ export class DemonstrationRecorder {
 
     this.activeSession.inputEventsCount++;
 
-    // 1. Scrub PII on input actions immediately before capture or emission
+    // 1. Scrub PII on input actions immediately before capture or emission (with password masking)
     const scrubbedAction = { ...actionData };
     if (this.activeSession.scrubPii && typeof scrubbedAction.text === "string") {
-      scrubbedAction.text = scrubPiiText(scrubbedAction.text);
+      const winLower = (activeWin?.title || "").toLowerCase();
+      const isAuthContext = /password|passcode|passphrase|log[ -]?in|sign[ -]?in|\bpin\b|credentials|sudo|authenticate/i.test(winLower);
+      if (isAuthContext || scrubbedAction.isPassword) {
+        scrubbedAction.text = "••••••••";
+      } else {
+        scrubbedAction.text = scrubPiiText(scrubbedAction.text);
+      }
     }
 
     // 2. Add settling delay (~100ms) so OS/GPU finishes repainting active window

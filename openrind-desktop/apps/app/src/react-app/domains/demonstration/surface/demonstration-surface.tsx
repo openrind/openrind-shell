@@ -62,9 +62,9 @@ export function DemonstrationSurface() {
     const bridge = (window as any).__OPENRIND_DESKTOP_ELECTRON__;
     if (!bridge?.invokeDesktop) return;
     if (status?.session?.isPaused) {
-      await bridge.invokeDesktop("demonstrationRecordAction", { type: "resume" });
+      await bridge.invokeDesktop("demonstrationResume");
     } else {
-      await bridge.invokeDesktop("demonstrationRecordAction", { type: "pause" });
+      await bridge.invokeDesktop("demonstrationPause");
     }
   };
 

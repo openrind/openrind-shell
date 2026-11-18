@@ -1101,11 +1101,103 @@ export function createCtfService() {
       ].filter(Boolean);
       for (const img of candidates) {
         if (await checkDockerImage(img)) {
-          task.image = img;
           return true;
         }
       }
       return false;
+    },
+
+    async inspectFolder(folderPath) {
+      if (!folderPath || !existsSync(folderPath)) {
+        return null;
+      }
+      const folderBase = basename(folderPath);
+      let name = folderBase;
+      let description = "";
+      let flag = "";
+      let backendPort = 8080;
+      let category = "web";
+
+      // 1. Check challenge.json
+      const challJson = join(folderPath, "challenge.json");
+      if (existsSync(challJson)) {
+        try {
+          const parsed = JSON.parse(await readFile(challJson, "utf8"));
+          if (parsed.name || parsed.title) name = parsed.title || parsed.name;
+          if (parsed.description) description = parsed.description;
+          if (parsed.category) category = parsed.category;
+          if (parsed.internal_port || parsed.backendPort) {
+            backendPort = Number(parsed.internal_port || parsed.backendPort);
+          }
+          if (parsed.flag) flag = parsed.flag;
+        } catch {}
+      }
+
+      // 2. Check DESCRIPTION.md / README.md
+      if (!description) {
+        const descPath = join(folderPath, "DESCRIPTION.md");
+        const readmePath = join(folderPath, "README.md");
+        const target = existsSync(descPath) ? descPath : (existsSync(readmePath) ? readmePath : null);
+        if (target) {
+          try {
+            description = (await readFile(target, "utf8")).trim();
+          } catch {}
+        }
+      }
+
+      // 3. Check REHOST.md
+      const rehostPath = join(folderPath, "REHOST.md");
+      if (existsSync(rehostPath)) {
+        try {
+          const text = await readFile(rehostPath, "utf8");
+          const flagMatch = text.match(/Flag:\s*([^\r\n]+)/i);
+          if (flagMatch && !flag) flag = flagMatch[1].trim();
+          const portMatch = text.match(/Port:\s*(\d+)/i);
+          if (portMatch) backendPort = Number(portMatch[1]);
+        } catch {}
+      }
+
+      // 4. Check flag.txt in folder or subdirectories
+      if (!flag) {
+        for (const candidate of [
+          join(folderPath, "flag.txt"),
+          join(folderPath, "chall", "flag.txt"),
+          join(folderPath, "challenge", "flag.txt"),
+          join(folderPath, "src", "flag.txt"),
+        ]) {
+          if (existsSync(candidate)) {
+            try {
+              flag = (await readFile(candidate, "utf8")).trim();
+              if (flag) break;
+            } catch {}
+          }
+        }
+      }
+
+      // 5. Detect port from server code if still default 8080
+      if (backendPort === 8080) {
+        for (const file of ["app.py", "server.py", "main.go", "app.js", "server.js", "src/main.go"]) {
+          const fp = join(folderPath, file);
+          if (existsSync(fp)) {
+            try {
+              const src = await readFile(fp, "utf8");
+              const m = src.match(/(?:port|listen|ListenAndServe)\s*(?:=|:|\()\s*[:"']?(\d{2,5})/i);
+              if (m && m[1]) {
+                const p = Number(m[1]);
+                if (p > 0 && p < 65536) backendPort = p;
+              }
+            } catch {}
+          }
+        }
+      }
+
+      return {
+        name,
+        category,
+        backendPort,
+        flag,
+        description,
+      };
     },
 
     async getProviderInfo() {
@@ -1319,7 +1411,6 @@ export function createCtfService() {
       for (const img of candidates) {
         if (await checkDockerImage(img)) {
           effectiveImage = img;
-          task.image = img;
           break;
         }
       }
@@ -1368,13 +1459,18 @@ export function createCtfService() {
         ]);
       } else {
         // Custom challenge container: map container backendPort to hostPort
+        const targetPort = task.backendPort || 8080;
         runRes = await runDocker([
           "run",
           "-d",
           "--name",
           containerName,
+          "-e",
+          `PORT=${targetPort}`,
+          "-e",
+          "HOST=0.0.0.0",
           "-p",
-          `${hostPort}:${task.backendPort || 8080}`,
+          `${hostPort}:${targetPort}`,
           imageName,
         ]);
       }
@@ -1449,7 +1545,7 @@ export function createCtfService() {
               response: mc.response,
               origin: "agent",
               observer: "agent",
-              relayed_by: "inference-gateway",
+              relayed_by: "direct-client",
             })),
             ...steps.map((s) => ({
               kind: "agent_step",
@@ -1505,7 +1601,7 @@ export function createCtfService() {
         // Health Check
         onStatus?.({ phase: "connecting", message: "Connecting to challenge application..." });
         let connected = false;
-        const deadline = Date.now() + 15_000;
+        const deadline = Date.now() + 25_000;
 
         while (Date.now() < deadline) {
           if (activeRunAbort?.signal?.aborted) break;
@@ -1806,6 +1902,7 @@ Return only valid JSON matching the schema. Keep thoughts concise (1-2 sentences
               tool: "submit",
               action: { flag: flagToSubmit },
               observation,
+              rawObservation: observation,
               durationMs: turnDuration,
             };
             steps.push(step);

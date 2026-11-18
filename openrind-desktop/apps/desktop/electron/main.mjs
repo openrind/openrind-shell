@@ -2624,6 +2624,8 @@ async function handleDesktopInvoke(event, command, ...args) {
       return ctfService.getProviderInfo();
     case "ctfImportTask":
       return ctfService.importTask(args[0]);
+    case "ctfInspectFolder":
+      return ctfService.inspectFolder(args[0]);
     case "ctfCheckImage":
       return ctfService.checkImage(args[0]);
     case "ctfBuildImage":
@@ -3694,13 +3696,22 @@ async function handleDesktopInvoke(event, command, ...args) {
 
             const spansBatch = [];
             for (const record of bundle.records) {
+              const payload = record.payload || {};
+              const frameAfter = payload.frame_after || payload.snapshot || {};
+              const frameBefore = payload.frame_before || {};
+              const artifactId = frameAfter.artifactId || payload.artifactId || frameBefore.artifactId || null;
+              let artifactUrl = frameAfter.artifactUrl || payload.artifactUrl || frameBefore.artifactUrl || null;
+              if (artifactId && defaultCollector) {
+                artifactUrl = `${defaultCollector.replace(/\/+$/, "")}/artifacts/${artifactId}`;
+              }
+
               spansBatch.push({
                 kind: "AGENT",
                 name: record.kind || "demonstration.observation",
                 project: bundle.project,
                 trace_id: bundle.traceId,
                 session_id: bundle.sessionId,
-                input: record.payload || {},
+                input: payload,
                 output: "recorded",
                 start: Number(BigInt(record.observed_at_unix_ns) / 1000000n) / 1000,
                 end: Number(BigInt(record.observed_at_unix_ns) / 1000000n) / 1000,
@@ -3710,6 +3721,11 @@ async function handleDesktopInvoke(event, command, ...args) {
                   "llm.model_name": "human-vla-demonstration",
                   "llm.provider": "desktop-recorder",
                   "agent.name": "vla-screen-recorder",
+                  ...(artifactId ? { artifactId } : {}),
+                  ...(artifactUrl ? { artifactUrl } : {}),
+                  ...(payload.frame_after ? { frame_after: payload.frame_after } : {}),
+                  ...(payload.frame_before ? { frame_before: payload.frame_before } : {}),
+                  ...(payload.activeWindow?.title ? { "window.title": payload.activeWindow.title } : {}),
                 },
               });
             }
@@ -3717,7 +3733,7 @@ async function handleDesktopInvoke(event, command, ...args) {
             try {
               await fetch(targetSpansUrl, {
                 method: "POST",
-                headers: { "content-type": "application/json" },
+                headers: { "content-type": "application/json", ...authHeaders },
                 body: JSON.stringify(spansBatch),
               });
             } catch (err) {
@@ -3737,7 +3753,7 @@ async function handleDesktopInvoke(event, command, ...args) {
               try {
                 await fetch(targetEventsUrl, {
                   method: "POST",
-                  headers: { "content-type": "application/json" },
+                  headers: { "content-type": "application/json", ...authHeaders },
                   body: JSON.stringify(eventPayload),
                 });
               } catch (err) {
@@ -3753,7 +3769,7 @@ async function handleDesktopInvoke(event, command, ...args) {
                   const b64 = item.buffer ? item.buffer.toString("base64") : "";
                   await fetch(targetArtifactsUrl, {
                     method: "POST",
-                    headers: { "content-type": "application/json" },
+                    headers: { "content-type": "application/json", ...authHeaders },
                     body: JSON.stringify({
                       artifact_id: item.originalName || hash,
                       sha256: hash,
@@ -3769,7 +3785,23 @@ async function handleDesktopInvoke(event, command, ...args) {
           },
         });
       }
-      const result = await demonstrationRecorder.start(opts);
+      const storedGateway = (await openrindCredentials.getCredential("haloopGatewayUrl").catch(() => null)) || process.env.HALOOP_GATEWAY_URL?.trim();
+      let defaultCollector = "";
+      if (storedGateway) {
+        try {
+          const u = new URL(storedGateway);
+          u.port = "8788";
+          u.pathname = "";
+          defaultCollector = u.origin;
+        } catch {}
+      }
+      const adminToken = (await openrindCredentials.getCredential("w8AdminToken").catch(() => null)) || process.env.ADMIN_TOKEN?.trim() || "";
+
+      const result = await demonstrationRecorder.start({
+        ...opts,
+        collectorUrl: defaultCollector,
+        adminToken,
+      });
       mainWindow?.webContents.send("demonstration-status-change", {
         recording: true,
         session: demonstrationRecorder.activeSession ? {
@@ -3794,6 +3826,12 @@ async function handleDesktopInvoke(event, command, ...args) {
       });
       return result;
     }
+    case "demonstrationPause":
+      demonstrationRecorder?.pause();
+      return { success: true };
+    case "demonstrationResume":
+      demonstrationRecorder?.resume();
+      return { success: true };
     case "demonstrationRecordAction": {
       const actionData = args[0] || {};
       demonstrationRecorder?.recordInputEvent(actionData);
