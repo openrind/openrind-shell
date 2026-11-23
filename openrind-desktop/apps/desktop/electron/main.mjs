@@ -3713,8 +3713,23 @@ async function handleDesktopInvoke(event, command, ...args) {
                 session_id: bundle.sessionId,
                 input: payload,
                 output: "recorded",
-                start: Number(BigInt(record.observed_at_unix_ns) / 1000000n) / 1000,
-                end: Number(BigInt(record.observed_at_unix_ns) / 1000000n) / 1000,
+                start: (() => {
+                  const beforeTs = payload.frame_before?.timestamp;
+                  const actionTs = payload.timestamp;
+                  const fallbackTs = Number(BigInt(record.observed_at_unix_ns) / 1000000n) / 1000;
+                  return beforeTs ? beforeTs / 1000 : (actionTs ? (actionTs - 100) / 1000 : fallbackTs);
+                })(),
+                end: (() => {
+                  const afterTs = payload.frame_after?.timestamp;
+                  const fallbackTs = Number(BigInt(record.observed_at_unix_ns) / 1000000n) / 1000;
+                  const endVal = afterTs ? afterTs / 1000 : fallbackTs;
+                  const startVal = (() => {
+                    const beforeTs = payload.frame_before?.timestamp;
+                    const actionTs = payload.timestamp;
+                    return beforeTs ? beforeTs / 1000 : (actionTs ? (actionTs - 100) / 1000 : fallbackTs);
+                  })();
+                  return endVal <= startVal ? startVal + 0.1 : endVal;
+                })(),
                 ok: true,
                 service_name: "openrind-demonstration-recorder",
                 attributes: {

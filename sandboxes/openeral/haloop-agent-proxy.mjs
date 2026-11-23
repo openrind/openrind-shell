@@ -564,12 +564,18 @@ export function createHaloopAgentProxy(options = {}) {
         const projectName = resolveProjectName();
         const collectorUrl = resolveCollectorUrl(currentGateway);
         const sessionContext = process.env.OPENRIND_HALOOP_SESSION_CONTEXT || req.headers['x-openrind-haloop-session'] || '';
+        const outboundRequestId = `req_${crypto.randomBytes(8).toString('hex')}`;
         const forwardHeaders = {
           'content-type': 'application/json',
           'content-length': Buffer.byteLength(openAiPayload),
           'x-w8-haloop-provider': route.provider,
           ...(adminToken ? { 'x-w8-haloop-admin-token': adminToken } : {}),
-          'x-w8-haloop-metadata': JSON.stringify({ project: projectName, session_id: proxySessionId, trace_id: proxySessionId }),
+          'x-w8-haloop-metadata': JSON.stringify({
+            project: projectName,
+            session_id: proxySessionId,
+            trace_id: proxySessionId,
+            request_id: outboundRequestId,
+          }),
           ...(collectorUrl ? {
             'x-w8-haloop-config': JSON.stringify({
               input_guardrails: [{ 'halo.mark': { collectorURL: collectorUrl }, async: false, deny: false }],

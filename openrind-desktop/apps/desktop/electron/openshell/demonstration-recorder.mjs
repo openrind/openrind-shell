@@ -132,7 +132,7 @@ function startWindowPolling() {
     if (process.platform === "win32") {
       try {
         const psCommand = `powershell -NoProfile -Command "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; using System.Text; public class Win { [DllImport(\\\"user32.dll\\\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\\\"user32.dll\\\", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder strText, int maxCount); [DllImport(\\\"user32.dll\\\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid); }'; $hwnd = [Win]::GetForegroundWindow(); $sb = New-Object System.Text.StringBuilder 256; $null = [Win]::GetWindowText($hwnd, $sb, 256); $pidOut = 0; $null = [Win]::GetWindowThreadProcessId($hwnd, [ref]$pidOut); $p = Get-Process -Id $pidOut -ErrorAction SilentlyContinue; @{ title = $sb.ToString(); process = $p.ProcessName } | ConvertTo-Json -Compress"`;
-        const { stdout } = await execAsync(psCommand, { timeout: 1200 });
+        const { stdout } = await execAsync(psCommand, { timeout: 4000 });
         if (stdout) {
           const parsed = JSON.parse(stdout.trim());
           cachedActiveWindow = {
@@ -145,7 +145,7 @@ function startWindowPolling() {
   };
 
   void poll();
-  windowPollTimer = setInterval(poll, 1500);
+  windowPollTimer = setInterval(poll, 2500);
 }
 
 function stopWindowPolling() {
@@ -293,6 +293,7 @@ export class DemonstrationRecorder {
         x: e.x,
         y: e.y,
         clicks: e.clicks || 1,
+        timestamp: Date.now(),
       });
     };
 
@@ -304,6 +305,7 @@ export class DemonstrationRecorder {
         y: e.y,
         rotation: e.rotation || 0,
         amount: e.amount || 0,
+        timestamp: Date.now(),
       });
     };
 
@@ -329,6 +331,7 @@ export class DemonstrationRecorder {
         this.recordInputEvent({
           type: "type_text",
           text,
+          timestamp: Date.now(),
         });
       }
     };
@@ -582,6 +585,7 @@ export class DemonstrationRecorder {
     if (this.activeSession.scrubPii && activeWin?.title) {
       activeWin = { ...activeWin, title: scrubPiiText(activeWin.title) };
     }
+    const actionTimestamp = actionData.timestamp || Date.now();
     const frameBefore = this.activeSession.lastFrame || null;
 
     this.activeSession.inputEventsCount++;
@@ -596,6 +600,13 @@ export class DemonstrationRecorder {
       } else {
         scrubbedAction.text = scrubPiiText(scrubbedAction.text);
       }
+    }
+
+    // Attach normalized coordinates if spatial coordinates exist
+    const bounds = frameBefore?.display?.bounds || { width: 1920, height: 1080 };
+    if (scrubbedAction.x !== undefined && scrubbedAction.y !== undefined) {
+      scrubbedAction.normalizedX = bounds.width > 0 ? Number(((scrubbedAction.x - (bounds.x || 0)) / bounds.width).toFixed(4)) : 0;
+      scrubbedAction.normalizedY = bounds.height > 0 ? Number(((scrubbedAction.y - (bounds.y || 0)) / bounds.height).toFixed(4)) : 0;
     }
 
     // 2. Add settling delay (~100ms) so OS/GPU finishes repainting active window
@@ -632,7 +643,7 @@ export class DemonstrationRecorder {
       payload: {
         ...scrubbedAction,
         activeWindow: activeWin,
-        timestamp: Date.now(),
+        timestamp: actionTimestamp,
         frame_before: frameBefore,
         frame_after: frameAfter,
       },
