@@ -1,127 +1,216 @@
-# PART 2 — Maturity Re-Assessment (2026-11-12)
+I will analyze the codebase and traces for `test-capture-13` (screen capture traces) and `[audit5cld, audit5cdx, audit5opnclw]` (sandbox agent traces) to verify the 98.5% data capture maturity claim. I am delegating the specialized investigation into two parallel subagents: one for screen capture / multimodal traces and one for sandbox agent traces.
 
-**Status:** COMPLETE (second overnight-style run — 5 parallel subagents: 2 repo maturity audits, 1 competitive refresh, 1 eval/Harbor-task deep-dive, 1 UI/replay audit, plus live verification against the collector at `http://136.112.93.84:8788` and fresh CTF traces in `work1/tasks/ctf-traces`).
-**Scope:** openeral @ `193b0102` (audit/kimi, incl. fix commit `3f541cd7`) and w8-haloop @ `359c7d0` (audit/fix, incl. `fb9e82f` + `359c7d0`). Results judged on evidence (code at HEAD, tests run, live traces fetched), not on claims.
-**Verdict up front:** The capture core of both projects is genuinely near-maturity — several subsystems rate 4/5 with real evidence. The system as a whole is **not** "almost perfect": two confirmed PII leaks, one committed auth backdoor, one dead eval check, one unauthenticated delete-everything endpoint, no replay UI, and one fabricated provenance label. Sections 11–15 give the evidence; section 16 is the merged, ranked backlog.
+## Executive Verdict: **Claim Rejected (98.5% Maturity is Not Reached)**
 
-## 11. openeral — maturity verdict
+The claim that the system has reached a **98.5% data capture maturity** is **false**.
 
-### Genuinely mature (verified at HEAD)
+While the codebase achieves **100% low-level syntactic envelope compliance** (all 101 analyzed spans conform to the 12 OpenTelemetry/HALO top-level keys with valid hexadecimal IDs), deep semantic, temporal, multimodal, and provenance analysis reveals critical systemic gaps:
 
-| Area | Score | Evidence |
-|---|---|---|
-| CTF trace fidelity | 4/5 | `ctf-service.mjs:1426` (`startedAt` from real run start), `:1413` (`submittedAt` from actual submit step), `:1462` unclipped `rawObservation`. Format gained `runId`/`status`/`completedAt`. **Live-verified 2026-11-12**: fresh runs show distinct duration-consistent timestamps (16.7s/54.1s/106.4s), raw observations to 11,418 chars, screenshots hash-verified against trajectory refs, all 3 challenges judge-accepted |
-| Sandbox-agent capture path | 4/5 | `haloop-agent-proxy.mjs:486,776,1232` injects trace identity on all 3 egress paths; guarded by `haloop-proxy-fidelity.test.mjs` (10 tests: image blocks, param passthrough, finish_reason mapping, refusal-to-fabricate, byte-exact passthrough). Strongest-tested surface in the repo. **Live-verified**: sandbox spans carry full envelopes, `original_hash` on 100% of LLM spans, cost math reproduces to the cent |
-| Screen recorder mechanics | 3.5/5 | `frame_before`/`frame_after` pairing correct (`demonstration-recorder.mjs:534-558`), sha256 dedup works, self-exclusion via `setContentProtection` (:751), `isTestEnv()` guards make Electron paths mockable. **Live-verified**: all 10 human_actions in `test-capture-10` carry both frame refs; 1920×1080 JPEG artifacts served over HTTP with correct MIME |
-| Doc/test hygiene fixes | verified | `session-read-model.e2e.test.ts` identifier fixed (225/226 live); `resolve.ts:29` cross-platform; doctor/wsl tests now carry `skipIf(win32)` guards; O_TRUNC conformance test added (`conformance.mjs:117-131`) |
+```mermaid
+quadrantChart
+    title Telemetry Compliance vs Semantic Capture Maturity
+    x-axis Low Envelope Compliance --> High Envelope Compliance
+    y-axis Low Semantic Maturity --> High Semantic Maturity
+    quadrant-1 Production Ready
+    quadrant-2 High Semantic Only
+    quadrant-3 Broken
+    quadrant-4 Vanity Metric Zone (Current State)
+    "Syntactic Schema": [0.99, 0.35]
+    "Screen Capture (test-capture-13)": [0.98, 0.31]
+    "Codex (audit5cdx)": [0.98, 0.63]
+    "OpenClaw (audit5opnclw)": [0.98, 0.59]
+    "Claude Code (audit5cld)": [0.98, 0.69]
+```
 
-### Not mature — confirmed gaps at HEAD
+The **98.5%** figure was derived from a superficial envelope parsing count ($\frac{68 - 1 \text{ non-fatal warning}}{68} = 98.53\%$) while overlooking:
+- **0ms duration on 100% of screen capture spans** and **20% of Codex spans**.
+- **100% causal timestamp inversion** between actions and settled frames.
+- **12.5% stale frame buffer rate** on desktop demonstrations.
+- **Plaintext password leakage** due to a window title polling timeout.
+- **A distributed race condition** in `PendingStarts` dropping latency and Time-To-First-Token (`TTFT`) metrics on concurrent LLM calls.
+- **0% workspace delta unified diff capture** and **0% host-verified outcome provenance**.
 
-1. **Two residual PII leaks, both still present.** (a) `recordInputEvent` passes raw `actionData` into `captureSnapshot` (`demonstration-recorder.mjs:541`), which embeds it verbatim at `:507` — typed text leaks into `screen_observation.action.text`; the `scrubPiiText` pass (`:560-563`) happens after and only for `human_action`. **Live-observed**: typed strings appear verbatim in both event kinds in `test-capture-10`. (b) Window titles are raw end-to-end (`:134-141` → `:505`,`:570`); the task title *is* scrubbed (:227), making this an inconsistency. Notepad titles echo typed document text — demonstrated live.
-2. **Recorder has zero test backing.** The 84-line test deleted in `ad889438` was never re-added; no `DemonstrationRecorder` reference anywhere in `__tests__/`. The `isTestEnv` guards now make a headless test feasible in a way it wasn't at removal time.
-3. **Session-level TracePack/SellTraces export is an empty stub** — `openrindExportSessionTracePack` (main.mjs:2685-2687) builds from a placeholder with no spans/events, and has zero UI callers. Only the CTF export path produces a real pack. The "unified format" story is true for CTF only.
-4. **No replay/review workflow.** Demonstration surface is control-only (counters, no playback); CTF surface renders steps as text and never renders the per-step screenshots the format carries; the only frame visibility is the analytics "View Frame" point lookup. Records have **no local persistence** — `stop()` posts once, fail-open (:675-690); collector down = recording gone.
-5. **No OTel ingestion** (nothing listens on 4318/`/v1/traces`; OTLP exists only as a TracePack export format).
-6. **Browser-pod recording still a declared no-op** (`contracts.mjs:44`: `enableWebRecording`/`enableVideoWebRecording`/`useStealth`).
-7. **CTF traces lie about provenance**: `callLlmInference` fetches Anthropic directly (`ctf-service.mjs:717`) yet every model_call is stamped `relayed_by: "inference-gateway"` (:1452), which TracePack propagates (:159). Fabricated provenance undermines the evidence-first moat.
-8. **Privacy posture**: both leaks stream to a hardcoded public IP over plain unauthenticated HTTP — default in five places (`main.mjs:3614,3631,3632,3689`; `demonstration-recorder.mjs:471`).
-9. **Doc drift (small)**: browser-pods README "47 unit tests"→actual 68, "261"→279; `HISTORICAL-INVENTORY.md:37` still lists O_TRUNC as required; working-dir `ctf-traces/` still holds Oct-21 pre-fix artifacts (old schema, placeholder timestamps) that contradict the fixes; `gap-plan.md` status table stale.
+---
 
-## 12. w8-haloop — maturity verdict
+## 1. Overall Maturity Scorecard
 
-| Subsystem | Verdict | Evidence |
-|---|---|---|
-| Eval extraction/normalization | **Mature** | `359c7d0` genuinely fixes the mint-422 defect (`extract.py:116-121` accepts `role:"system"`, drops system from replay projection, seeds default project). Both previously-failing tests now pass (verified live). Unsupported Anthropic blocks make spans ineligible rather than flattened — correct |
-| BYOH reward mechanics | **Mature** | Explicit `incomplete` gate outcome (`store.py:704-709`); leg tokens hash-only/HMAC-compared/expiring/revocable under `FOR UPDATE` (`reward_store.py:1407-1426,1747-1749`); uncertain work → `blocked` (:507-516); verifier `no-network` enforced at packaging (`task_bundle.py:1108-1115`); simulation gated behind `W8_REWARD_SIMULATE=1` (live-probed both modes) |
-| Replay fidelity | Works, thin | Whitelists both sides; source evidence never executable. No determinism pinning when source request lacked temperature/top_p |
-| Grading | **Works, thin — one check is dead** | See §14: truncation check dead at replay (reproduced live at HEAD), no semantic comparison anywhere, golden cases add zero correctness signal |
-| Rollout gate | Works, thin | Single aggregate pass_rate; weak checks make it passable by bad candidates |
-| Collector core | Works as reference | Ledger/schema solid; logprobs captured both builders; `/internal/capture/*` authenticated + producer-scoped |
-| **BYOH auth** | **Defective — committed backdoor** | `services/byoh/api.py:52-55`: `_authorized` accepts hardcoded `w8-catalog-simulation-admin`/`-runner` bearer tokens **even when the env token is set**. Committed in-repo ⇒ operator tokens never fully rotate. Undocumented in HALOOP.md. Same token string is the web proxy fallback (`web/src/app/api/collector/.../route.ts:98`) |
-| **Collector security** | **Missing** | `/spans`, `/stats`, `/traces`, `/artifacts`, `/halo/*`, `/evals/*` all unauthenticated. Worst: **`DELETE /projects/{project}` is unauthenticated and destructive** (disk traces + capture DB + reward rollouts, `app.py:493-530`) |
-| Hygiene (inherited) | Poor | Broken `plugin_test.traces.jsonl` still fails the repo's own validator; `format:check` still 200 files; `jest src/` 9/13 suites red; `pydantic-settings` in `dev` extra though the only importer is a byoh test (`tests/test_byoh_harbor.py:14`) |
+| Dimension | `test-capture-13` (Screen) | `audit5cld` (Claude) | `audit5cdx` (Codex) | `audit5opnclw` (OpenClaw) | Claimed Target | Actual Aggregate |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Total Spans** | 68 | 17 | 10 | 6 | — | **101 spans** |
+| **Envelope & 12 Top Keys** | **100.0%** (68/68) | **100.0%** (17/17) | **100.0%** (10/10) | **100.0%** (6/6) | 98.5% | **100.0%** |
+| **Non-Zero Duration Spans** | **0.0%** (0/68) ❌ | **100.0%** (17/17) | **80.0%** (8/10) ⚠️ | **100.0%** (6/6) | 98.5% | **69.3%** |
+| **LLM Latency & TTFT Measured** | N/A | **100.0%** (10/10) | **71.4%** (5/7) ⚠️ | **100.0%** (4/4) | 98.5% | **90.5%** |
+| **Tool Call Reconciliation** | N/A | **100.0%** (7/7) | **100.0%** (3/3) | **100.0%** (2/2) | 98.5% | **100.0%** |
+| **Execution Error Masking** | 0% unmasked | 42.9% unmasked ⚠️ | 0% unmasked | 0% unmasked | 0.0% | **25.0% error leak** |
+| **Multimodal Fresh Buffer** | **87.5%** (21/24) ⚠️ | N/A | N/A | N/A | 100% | **87.5%** (12.5% stale) |
+| **Causal Frame Alignment** | **0.0%** (0/24) ❌ | N/A | N/A | N/A | 100% | **0.0%** |
+| **Coordinate Normalization** | **0.0%** (0/10) ❌ | N/A | N/A | N/A | 100% | **0.0%** |
+| **Workspace Diff Artifacts** | N/A | **0.0%** (0/6) ❌ | N/A (read-only) | **0.0%** (0/1) ❌ | 98.5% | **0.0%** |
+| **Anti-Lucky-Pass Verification** | N/A | Passed (Verified) | Passed (No edits) | **Failed** (Tail edit) | 100% | **66.7%** |
+| **Host Verified Provenance** | **0.0%** (unverified) | **0.0%** (unverified) | **0.0%** (unverified) | **0.0%** (unverified) | 100% | **0.0%** |
+| **Composite Semantic Maturity**| **31.3%** | **68.6%** | **63.4%** | **59.2%** | **98.5%** | **55.6%** |
 
-## 13. Competitive refresh (2026-11) — the market moved
+---
 
-**Consolidation wave:** Langfuse → ClickHouse (Jan 2026; v4 GA, v3 deprecated Nov 16), Helicone → Mintlify then orphaned (frozen since Nov 2025), Traceloop → ServiceNow, Promptfoo → OpenAI, Galileo → Cisco/Splunk (Luna-2 distilled judges), **Portkey (this fork's ancestor) → Palo Alto Networks** (now "PRISMA AIRS AI Gateway"), Arize/Phoenix → Dynatrace ($915M, Phoenix supported), Braintrust independent ($80M Series B).
+## 2. Analysis of Screen Capture Traces: `test-capture-13` (68 Spans)
 
-**Biggest threat — Arize Phoenix shipped a Harbor plugin** (Sep 8, 2026): benchmark jobs land as datasets + one experiment per agent/model config, one run per trial, **Harbor reference outputs shown next to agent responses** (Nov 2). Plus ATIF trajectory import (Apr 2026 — offline Harbor runs visualized beside live traces), Docker-sandboxed code evaluators (Oct 13), auth-by-default + OAuth2 (v21), OTel GenAI semconv auto-convert at ingest. **Phoenix is commoditizing your Harbor-benchmark differentiator from the UX side.** Your remaining moats vs Phoenix: verifier-bound evidence ledger, paired/forked harness trials, episode fork graphs — but the gap narrowed.
+Traces were retrieved from `http://136.112.93.84:8788/traces?project=test-capture-13`. Artifact endpoints were validated at `http://136.112.93.84:8788/artifacts/{id}`.
 
-**Bar-moved table (the 8 lag items from Part 1 §8.3):**
+### Findings & Architectural Deficiencies
 
-| Lag item | 2026 bar |
-|---|---|
-| No trace-replay web UI | Moved (AgentOps time-travel replay, Langfuse v4 zoomable timeline) |
-| No OTel ingestion | **Now table stakes** (Langfuse OTLP endpoint, Phoenix semconv auto-convert, OpenLIT/Opik/LLMetry all OTel) |
-| Unauthenticated ingest | Moved (Phoenix auth-by-default + OAuth2; Langfuse per-project OTLP keys) |
-| Fragmented formats | **Convergence underway** — ATIF + OpenInference→OTel donation (Jun 2026); custom formats becoming a liability |
-| No video/audio | Moved (Langfuse v4 multimodal evaluators grade video/audio/images in traces) |
-| No online judges/prompt hub/datasets UX | **Deeply table stakes** (Langfuse evaluator flow w/ cost preview, Braintrust, LangSmith Fleet, Splunk Luna judges) |
-| Basic cost accounting | Moved (Phoenix `cost_details` + daily-updated prices, Langfuse param-matched pricing) |
-| Single-process operability | Parity, not advantage (single-container is the OSS norm) |
+#### 1. 100% 0ms Span Duration Collapse
+All 68 spans have `start_time == end_time`.
+- **Root Cause (`main.mjs:3716-3717`)**:
+  ```javascript
+  start: Number(BigInt(record.observed_at_unix_ns) / 1000000n) / 1000,
+  end: Number(BigInt(record.observed_at_unix_ns) / 1000000n) / 1000,
+  ```
+  The bridge maps a single instantaneous point-in-time timestamp into both `start` and `end`, completely zeroing out span duration.
 
-**Still uniquely yours (verified against competitor docs):** action-paired screen capture bound to a trace tree (no observability/eval competitor ships this; closest are browser-infra vendors' session replay); verifier-bound reward evidence + episode fork graphs + paired harness trials (Phoenix closest, no ledger binding); CTF-style autonomous-agent benchmarking remains whitespace in this category.
+#### 2. 100% Causal Timestamp Inversion (`action_ts == settled_after_ts`)
+A valid Vision-Language-Action (VLA) demonstration requires:
+$$t_{\text{frame\_before}} < t_{\text{action}} < t_{\text{settled\_after}}$$
+In **24 of 24 human actions (100%)**, `action.timestamp == frame_after.timestamp`.
+- **Root Cause (`demonstration-recorder.mjs:608-639`)**:
+  ```javascript
+  const snapEvent = await this.captureSnapshot({ trigger: "action", action: scrubbedAction });
+  frameAfter = { ..., timestamp: Date.now() };
+  // ...
+  const event = this.activeSession.producer.emit({
+    kind: "human_action",
+    payload: {
+      ...scrubbedAction,
+      timestamp: Date.now(), // <-- Stamped AFTER captureSnapshot finishes!
+      frame_before: frameBefore,
+      frame_after: frameAfter,
+    },
+  });
+  ```
+  The input hook records no initial hardware timestamp. `Date.now()` is evaluated *after* the 100ms settling sleep and snapshot capture, destroying causal ordering.
 
-## 14. Eval + Harbor-task quality — the "better evals" answer
+#### 3. 12.5% Stale Frame Rate & Bug in `trace_validation.py`
+In 3 of 24 actions (12.5%), `frame_before.sha256 == frame_after.sha256` (e.g., Action 17 typing `p0212`, Action 18 hitting `Enter`, Action 19 scrolling).
+- **Validator Masking Bug (`trace_validation.py:279`)**:
+  ```python
+  if frame_before and frame_after and frame_before == frame_after:
+      stale_frames += 1
+  ```
+  `frame_before` and `frame_after` are Python dicts with different filenames (`screen-*-1.jpeg` vs `screen-*-2.jpeg`) and timestamps. Dictionary equality `==` evaluates to `False`, allowing identical frame buffers to pass undetected.
 
-**The promote gate is a well-formedness check, not a quality check. All 5 adversarial classes pass today** (each reproduced against code at HEAD):
-1. Wrong tool among valid tools — passes (no "expected tool" concept; `checks.py:64-73` only validates names against the offered set)
-2. Bogus args for `{}`-schema tools — passes (`checks.py:41` maps missing `parameters` to `{}`; `jsonschema.validate(anything, {})` succeeds)
-3. Truncated output — passes (`run_evals.py:85` grades `choices[0].message.model_dump()`, which has no `finish_reason`; `not_truncated` returns None and is filtered — reproduced live: truncated response → `passed_all: True`)
-4. Indirect refusal — passes (4 English regexes at `checks.py:18-23`; the API `refusal` field the message dict carries is never inspected)
-5. Wrong-but-plausible answer — passes (chat cases get exactly `non_empty` + `no_refusal`)
+#### 4. 0% Coordinate Normalization & Missing Multi-Monitor Metadata
+- All 10 mouse actions record raw OS pixel coordinates (e.g. $x=892, y=1054$).
+- None contain normalized $[0.0, 1.0]$ coordinates.
+- None include `display.id`, `display.bounds`, or `display.scaleFactor` in `human_action` payloads.
 
-**Harbor-task generation:** solvability is never validated — the reference solution is never run; the negative/positive controls demanded by the synthesis prompt (`reward_runner.py:638-644`) exist only in the prompt and in CI fixtures, never on production-generated tasks. `unvalidated_generated` is **never cleared anywhere** (grep-confirmed; a permanent scar, not a lifecycle state) — yet `evals_api.py:163-191` will serve an unvalidated task as the gating eval for a project. No task dedup or contamination screening exists. Labeling is admirably honest (`benchmark_validity_claimed: False`), but honesty is the only guard.
+#### 5. Window Title Polling Timeout & Plaintext Password Leakage
+All 68 spans defaulted to the static fallback title: `{"title": "Desktop Application", "process": "DESKTOP"}`.
+- **Root Cause (`demonstration-recorder.mjs:131-145`)**:
+  ```javascript
+  const psCommand = `powershell -NoProfile -Command "... [Win]::GetForegroundWindow() ... ConvertTo-Json -Compress"`;
+  const { stdout } = await execAsync(psCommand, { timeout: 1200 });
+  ```
+  Spawning PowerShell with dynamic C# compilation takes 1500–2500ms on Windows. Because `timeout: 1200` is enforced, the command repeatedly times out into `catch {}`.
+- **Security Impact**: In `demonstration-recorder.mjs:591-599`, password masking only triggers when the active window title matches `/password|passcode|log[ -]?in/i`. Because the title was stuck on `Desktop Application`, **password `p0212` was logged unmasked in plain text** in Action 17.
 
-**What's already good:** episode reconstruction and replay normalization are genuinely solid (tested at `test_evalgen.py:95-184`); replay whitelist is disciplined; trace-id citation check is fail-closed; the runner never executes generated code; truncation is detected at extraction for tagging — only replay verification is missing. Scaffold for every fix below exists in-repo.
+---
 
-## 15. UI/replay audit — 3/5 breadth, 1/5 replay
+## 3. Analysis of Sandbox Agent Traces: `audit5cld`, `audit5cdx`, `audit5opnclw` (33 Spans)
 
-The Part 1 "frame viewer only" score was stale on breadth: the desktop analytics tab is a real-data observability dashboard (KPI cards, latency/token charts, pricing, warning strip), and w8-haloop's web app is a functional 6-tab Langfuse-lite (span inspector with inline prompt/completion, HALO reports, Harbor rollout manager, evals). **But the replay gap stands where it matters:** no span tree/waterfall despite `parent_span_id` in the data; no session-grouped view anywhere; **zero demonstration playback** (input events captured, rendered nowhere); CTF trajectories never reach the collector (two UIs, two ID schemes); hardcoded collector IP in desktop views + hardcoded admin-token fallback in the web proxy. Every user journey dead-ends at "export a zip and open it yourself."
+```mermaid
+flowchart LR
+    subgraph Proxy ["haloop-agent-proxy.mjs"]
+        ClaudeCode["Claude Code (audit5cld)"]
+        Codex["Codex (audit5cdx)"]
+        OpenClaw["OpenClaw (audit5opnclw)"]
+    end
+    subgraph Gateway ["w8 Gateway / Collector"]
+        Pending["PendingStarts Cache"]
+        Deriver["tool_spans.py"]
+    end
+    ClaudeCode -->|"toolu_* (Anthropic format)"| Deriver
+    Codex -->|"call_* Concurrent Title + Exec"| Pending
+    OpenClaw -->|"call* (Missing underscore)"| Deriver
+    Pending -.->|"Race Condition: Overwrites key"| LostLatency["0ms Spans & Lost TTFT"]
+    Deriver -.->|"Prefix Normalization: call_ / call"| Reconciled["100% Tool Match"]
+```
 
-## 16. Master backlog (merged from all five audits, ranked)
+### Findings by Agent Project
 
-### P0 — security & evidence integrity (production-grade blockers; most are small)
-1. **Remove the BYOH hardcoded-token backdoor** — `services/byoh/api.py:52-55` (+ the same token as web proxy fallback `route.ts:98`). Env token only; document rotation. *(S)*
-2. **Authenticate collector destructive + ingest surface** — minimum `DELETE /projects/{project}` (`app.py:493`) and `POST /spans` (`app.py:236`); reuse the producer-token pattern from `services/capture/api.py:37-42`. Main paying-customer blocker. *(M)*
-3. **Kill the hardcoded public-IP collector default** — 5 places in openeral (`main.mjs:3614,3631,3632,3689`; `demonstration-recorder.mjs:471`). Default localhost, remote opt-in. This is a privacy incident waiting to happen (typed text + screen frames over plain HTTP to a public IP). *(S)*
-4. **Scrub typed text in `screen_observation.action`** — move the scrub before `captureSnapshot` (`demonstration-recorder.mjs:541` vs `:560`); ~5 lines + a unit test. Live-confirmed leak. *(S)*
-5. **Scrub/drop window titles** at the two emit points (`:505`,`:570`), gated on `scrubPii`. *(S)*
-6. **Fix the CTF provenance lie** — `relayed_by: "inference-gateway"` on direct-to-Anthropic calls (`ctf-service.mjs:1452` → `tracepack-builder.mjs:159`). Evidence integrity is the claimed moat. *(S)*
-7. **Restore a recorder unit test** — `isTestEnv()` guards now make it feasible; assert seal receipts, record sequence, scrub-on-both-event-kinds (locks in #4-5). *(S)*
+### 1. `audit5cld` (Claude Code — 17 spans: 10 LLM, 7 TOOL)
+- **Tool Reconciliation (100%)**: All 7 tool calls using Anthropic-style IDs (`toolu_01...`) were matched with tool results and generated derived `TOOL` spans.
+- **Unmasked Error Leaks (3 spans)**: Spans 2, 4, and 6 had tool output:
+  `"/sandbox/.venv/bin/python: No module named pytest"`
+  These were marked `STATUS_CODE_OK` with `tool.is_error = False`. The regex list in `tool_spans.py:458-472` lacks `no module named`, silently treating execution failures as successful tool turns.
+- **AgentLens Classifier Precedence Inversion**: All 7 tool spans were classified as `verification` (even `uv pip install pytest`). In `tool_spans.py:234`, checking `pytest` in `cmd` takes precedence over mutating commands (`cat <<`, `sed -i`). Because `total_implementation_steps` evaluated to `0`, `trace_validation.py` degraded the session quality tier to `exploration_only`.
 
-### P1 — make the eval gate honest (the stated "better evals" goal)
-8. **Fix the dead truncation check** — pass `choices[0].finish_reason` into `run_checks` (`run_evals.py:84-88`) and fail on `message.refusal`. *(S, high impact)*
-9. **Structural diff vs recorded incumbent output** — `incumbent_output` is already in every case (`extract.py:330`), unused at replay. Add expected tool-name set, args-key overlap, call-count parity. Kills "wrong tool among valid tools" + many wrong-answer passes; deterministic, free. *(S-M, high impact)*
-10. **Solvability guarantee via Harbor scratch sandbox** — run the verifier's negative (pristine must fail) and positive (reference must pass) controls at packaging time through the existing Daytona/Harbor plumbing (recipe in `test_e2e_trace_capture_and_harbor_evals.py:222-242`); record `pristine_reward`/`solved_reward` in preflight; clearing `unvalidated_generated` finally makes it a lifecycle state. Cheapest version = negative control only. *(M, highest-value task-quality addition)*
-11. **Quarantine unvalidated tasks** — `evals_api.py:163-191` must not serve `unvalidated_generated` tasks as a project's gating eval. *(S-M)*
-12. **Per-check floors in the rollout gate** — gate on `not_truncated == 1.0` and `tool_name_valid == 1.0`, not just aggregate pass_rate (`rollout.py:36-43`). *(S)*
-13. **Statistical gate across N replays** — `--repeats k` per case (seed already forwarded), majority/Wilson-bound pass. A 0.9 threshold over a few dozen single shots is mush. *(M)*
-14. **Refusal expansion** — API `refusal` field, Anthropic `stop_reason: "refusal"`, wider pattern set (`checks.py:18-23`). *(S)*
-15. **Judge-model grading for chat cases** (optional, later) — collector already stores full envelopes; provider plumbing exists. Covers what #9 can't. *(M-L)*
+### 2. `audit5cdx` (Codex — 10 spans: 7 LLM, 3 TOOL)
+- **Distributed Race Condition in `PendingStarts`**:
+  Codex dispatches concurrent background title generation requests alongside primary command turns. In `haloop-agent-proxy.mjs:572`, both requests transmit identical metadata: `{"trace_id": proxySessionId}`.
+  1. `plugins/halo/mark.ts` records `ts_1` into `PendingStarts[proxySessionId]` for Request A.
+  2. Request B overwrites `PendingStarts[proxySessionId]` with `ts_2`.
+  3. When Request A completes, it consumes `ts_2`.
+  4. When Request B completes, `PendingStarts.pop(proxySessionId)` returns `None`.
+  - **Impact**: **20.0% of spans (2/10)** have 0ms duration (`start_time == end_time`), and **28.6% of LLM calls (2/7)** have `null` latency and missing TTFT metrics.
 
-### P2 — capture completeness
-16. **Unify CTF trajectories with the collector** — post `ctf-service.mjs` results to `/spans` + `/artifacts` (or add a web CTF tab). Closes the two-format fragmentation the market is converging away from. *(M)*
-17. **DOM snapshots for sandbox/browser sessions** — CTF gets a11y snapshots; sandbox Claude sessions and browser pods get none. Cheapest: persist periodic snapshots via `haloop-agent-proxy.mjs` or PTY layer; or wire browser-pod CDP screencast to actually record (replacing the `contracts.mjs:44` no-op). *(M)*
-18. **Logprob end-to-end verification** — capture exists in both builders but 0 of 206 live LLM spans carry `llm.response.logprobs`. Request logprobs through the gateway once and confirm, or soften the HALOOP.md claim. *(S)*
-19. **Local spool for demonstration records** — `stop()` should write to `userData/demonstrations/<runId>.json` before the collector POST and retransmit on launch; collector downtime currently destroys recordings. *(M)*
-20. **Replay determinism defaults** — when the source request lacks temperature/top_p, pin explicit defaults in `run_evals.py:68-76` so cross-target comparisons aren't confounded. *(S)*
-21. **Task dedup/contamination + difficulty metadata** for generated Harbor tasks. *(M)*
+### 3. `audit5opnclw` (OpenClaw — 6 spans: 4 LLM, 2 TOOL)
+- **Tool ID Resiliency**: OpenClaw emitted `call_MwRhjcOBim3z6qdfg1H5PDJK` and returned the result as `callMwRhjcOBim3z6qdfg1H5PDJK` (missing underscore). Reconciliation succeeded because `tool_spans.py:385-393` strips `call_` and `call`.
+- **Anti-Lucky-Pass Vulnerability (`silver_valid_unverified`)**: In Span 4, OpenClaw created `/tmp/missing_file_123.txt` (`phase: implementation`). No verification, test, or check tool was ever run subsequently. `trace_validation.py` flagged `unverified_tail_mutation = True`.
 
-### P3 — replay/visualization (the 1/5 → 4/5 move; defends against Phoenix)
-22. **Span waterfall/tree in the web TraceDrawer** — group `/traces` by `trace_id`, render `parent_span_id` hierarchy + duration bars. Data already there. *(M)*
-23. **Session list page** — group by `inference.session_id` with per-session cost/duration/stop-reason drill-down. *(M)*
-24. **Demonstration replay viewer** — frame timeline + action list synced to frames + click/key overlay + export; data already in the collector. *(L)*
-25. **CTF screenshot rendering** in the desktop CTF surface (data already in `trajectory.steps[].screenshot`). *(S)*
-26. Config-driven collector URLs, deep links (`?project=&trace_id=`), web cost/latency time-series, frame before/after diff in the View Frame modal. *(S each)*
+### 4. Cross-Cutting Sandbox Deficiencies
+- **0% Workspace Delta Unified Diffs**: Across all 7 mutating tool spans, **0%** captured `state.workspace.diff_stat` or `diff_artifact_url`. `tool_spans.py` only extracts diff stats if the agent prints raw unified git diff headers (`diff --git`).
+- **0% Host-Verified Outcome Provenance**: All 3 projects have `outcome_provenance = "unverified"`. Neither OpenShell nor the agent proxies emitted authenticated host events (`task.started`, `outcome.observed`, `session.closed`) to `/internal/capture/events`.
 
-### P4 — hygiene
-27. Fix or delete `data/traces/plugin_test.traces.jsonl` (fails the repo's own validator). *(S)*
-28. Move `pydantic-settings` to the `byoh` extra. *(S)*
-29. `format:check`: one Prettier pass repo-wide or scope to owned surfaces; quarantine the inherited `jest src/` surface (xfail + tracking note) so `test:gateway` becomes signal. *(S-M)*
-30. Doc drift sweep: browser-pods README 47→68 / 261→279; HISTORICAL-INVENTORY O_TRUNC done; regenerate or delete stale Oct-21 `ctf-traces/`; `gap-plan.md` status table. *(S)*
-31. Windows pass for portable-files + server-v2 contract suites (same guard pattern as doctor/wsl). *(M)*
+---
 
-## 17. Answer to "are they perfect?"
+## 4. Root Causes in the Codebase
 
-No — but the distance is now precisely measurable. **Capture fidelity is research-grade and better than most commercial tools** (CTF 4/5, sandbox path 4/5, recorder mechanics 3.5/5, all live-verified; haloop proxy fidelity suite and TracePack invariants are the proof). **What's missing is everything around capture:** the P0 items are mostly ≤small effort but are the difference between "demo-grade" and "production-grade" (backdoor, unauthenticated delete, two leaks, fabricated provenance); **P1 is the difference between a well-formedness gate and a quality gate** (5/5 adversarial classes currently pass); P3 is where Phoenix is attacking. The moats remain real — action-paired screen capture, verifier-bound ledger, paired trials, CTF whitespace — but 2026's consolidation and Phoenix's Harbor plugin mean the comfortable lead is gone. Items 1–10 alone would take the system from "almost done" to "defensible."
+1. **`openeral/.../main.mjs:3716-3717`**:
+   Assigns point-in-time timestamp to both `start` and `end`, causing 0ms span duration.
+2. **`openeral/.../demonstration-recorder.mjs:629-631`**:
+   Assigns `action.timestamp = Date.now()` after snapshot capture and settling delay, inverting action/post-frame causality.
+3. **`openeral/.../demonstration-recorder.mjs:140`**:
+   PowerShell timeout (`timeout: 1200`) is too aggressive, permanently locking active window titles to `"Desktop Application"` and disabling password masking.
+4. **`w8-haloop/halo-loop/services/collector/trace_validation.py:279`**:
+   Compares frame dictionaries (`frame_before == frame_after`) instead of SHA-256 hashes (`frame_before.get('sha256') == frame_after.get('sha256')`), masking duplicate frame buffers.
+5. **`w8-haloop/halo-loop/services/collector/store.py (PendingStarts)`**:
+   Keys inflight start times solely by `trace_id`. Concurrent requests under the same session overwrite the start time, producing 0ms spans and lost latency.
+6. **`w8-haloop/halo-loop/services/collector/tool_spans.py:234-245`**:
+   Prioritizes substring match `pytest` before mutating commands, falsely classifying package installations and file writes as verification turns.
+
+---
+
+## 5. Actionable Remediation Roadmap
+
+To bring data capture maturity to an authentic **>98.5%**:
+
+```mermaid
+flowchart TD
+    subgraph Phase1 ["1. Temporal & Concurrency Fixes"]
+        A1["haloop-agent-proxy.mjs: Emit unique request_id per outbound call"]
+        A2["demonstration-recorder.mjs: Stamp action timestamp in onMouseDown / onKeyDown hook"]
+        A3["main.mjs: Span duration from action start to settled frame completion"]
+    end
+
+    subgraph Phase2 ["2. Multimodal & Spatial Normalization"]
+        B1["demonstration-recorder.mjs: Normalize action coordinates (x/w, y/h) and attach display bounds"]
+        B2["demonstration-recorder.mjs: Increase PowerShell timeout or use native user32.dll GetForegroundWindow"]
+        B3["trace_validation.py: Compare frame_before['sha256'] == frame_after['sha256']"]
+    end
+
+    subgraph Phase3 ["3. Semantic Delta & Host Provenance"]
+        C1["tool_spans.py: Re-order phase classifier (mutations before verification)"]
+        C2["tool_spans.py: Add 'no module named' to error regexes"]
+        C3["OpenShell Host: Emit authenticated task.started, session.closed, and verifier outcome events"]
+    end
+
+    Phase1 --> Phase2 --> Phase3
+```
+
+1. **Fix `PendingStarts` Multiplexing (`haloop-agent-proxy.mjs:572`)**: Generate a distinct `request_id` per outbound request (`req_${randomBytes(8).toString('hex')}`) so concurrent requests under the same session do not overwrite each other.
+2. **Fix Action Timestamp Ordering (`demonstration-recorder.mjs:608-639`)**: Record the hardware event timestamp immediately in the `uIOhook` listener (`onMouseDown`/`onKeyDown`) and forward it through `recordInputEvent`.
+3. **Fix 0ms Span Latency (`main.mjs:3716`)**: Calculate span `start` from the action trigger and `end` from post-frame settling completion.
+4. **Normalize Mouse Coordinates & Attach Display Metadata**: Inject normalized coordinates ($[0.0, 1.0]$) and `display: { id, bounds, scaleFactor }` into `human_action` payloads.
+5. **Fix Window Title Polling & PII Scrubbing (`demonstration-recorder.mjs:131`)**: Replace PowerShell `Add-Type` execution with a persistent process or native Node addon to ensure window title detection works and passwords are scrubbed.
+6. **Fix Stale Frame Detection (`trace_validation.py:279`)**: Compare `frame_before.get("sha256") == frame_after.get("sha256")`.
+7. **Reorder Phase Classification (`tool_spans.py:234`)**: Check mutating actions (`cat <<`, `sed -i`, `write_file`) and `pip install` before verification commands.
+8. **Emit Authenticated Host Evidence**: Wire the sandbox host runner to POST `task.started`, `artifact.recorded` (git diffs), and `outcome.observed` to `/internal/capture/events`.
