@@ -385,7 +385,9 @@ export class DemonstrationRecorder {
     startWindowPolling();
 
     // Baseline initial snapshot frame
-    void this.captureSnapshot({ trigger: "initial" });
+    if (!isTestEnv()) {
+      void this.captureSnapshot({ trigger: "initial" }).catch(() => {});
+    }
 
     return {
       started: true,
@@ -640,7 +642,11 @@ export class DemonstrationRecorder {
     if (!this.activeSession) return null;
 
     // Excluded windows (password managers) are never captured: no frames.
-    const activeWindow = await this.getActiveWindowFn();
+    let activeWindow = null;
+    try {
+      activeWindow = await this.getActiveWindowFn();
+    } catch {}
+    if (!this.activeSession) return null;
     if (this._isExcludedWindow(activeWindow)) {
       this.activeSession.excludedSkips++;
       this._noteCaptureGap(`excluded_window:${normalizeProcessName(activeWindow?.process)}`);
@@ -806,7 +812,11 @@ export class DemonstrationRecorder {
   async _recordInputEventInternal(actionData) {
     if (!this.activeSession || this.activeSession.isPaused) return null;
 
-    let activeWin = await this.getActiveWindowFn();
+    let activeWin = null;
+    try {
+      activeWin = await this.getActiveWindowFn();
+    } catch {}
+    if (!this.activeSession || this.activeSession.isPaused) return null;
     // Excluded windows (password managers) never produce input events.
     if (this._isExcludedWindow(activeWin)) {
       this.activeSession.excludedSkips++;
