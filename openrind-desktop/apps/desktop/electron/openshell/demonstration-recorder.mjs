@@ -270,7 +270,7 @@ export class DemonstrationRecorder {
   constructor({
     getMainWindow,
     postCollectorEvents,
-    getActiveWindow: getActiveWindowOverride,
+    getActiveWindow: getActiveWindowOverride = undefined,
   }) {
     this.getMainWindow = getMainWindow;
     this.postCollectorEvents = postCollectorEvents;
