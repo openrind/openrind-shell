@@ -32,8 +32,6 @@ on:
     branches:
       - nemo
       - browser-pods
-      - audit
-      - new/audit
 
     paths:
       - openrind-desktop/apps/app/**
