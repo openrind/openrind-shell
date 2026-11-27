@@ -140,7 +140,7 @@ Do not rebuild NVIDIA's Community base to solve an image-resolution problem.
 
 ```text
 crates/openeral-fused/       primary PostgreSQL FUSE daemon
-openeral-js/                 migrations, CLI, compatibility sync, just-bash library
+openeral-js/                 migrations, CLI, compatibility sync, just-bash library, workspace change manifests
 sandboxes/openeral/          image scripts and shared policy
 vendor/openshell/            pinned OpenShell FUSE capability patch
 tests/fuse/                  POSIX conformance and real OpenShell FUSE E2E

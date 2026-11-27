@@ -41,7 +41,7 @@ async function getSafeStorage() {
   return safeStorage;
 }
 
-/** @typedef {"databaseUrl" | "anthropicApiKey" | "openRouterApiKey" | "codexApiKey" | "openaiApiKey" | "openrindGatewayApiKey" | "elevenLabsApiKey" | "haloopGatewayUrl" | "w8AdminToken"} CredentialKey */
+/** @typedef {"databaseUrl" | "anthropicApiKey" | "openRouterApiKey" | "codexApiKey" | "openaiApiKey" | "openrindGatewayApiKey" | "elevenLabsApiKey" | "haloopGatewayUrl" | "w8AdminToken" | "w8CaptureProducerToken"} CredentialKey */
 
 const CREDENTIAL_KEYS = /** @type {const} */ ([
   "databaseUrl",
@@ -56,6 +56,9 @@ const CREDENTIAL_KEYS = /** @type {const} */ ([
   // Haloop Gateway Edge URL and Admin Token overrides
   "haloopGatewayUrl",
   "w8AdminToken",
+  // Producer bearer token for the w8-haloop capture evidence API
+  // (/internal/capture/events). Separate from the admin token.
+  "w8CaptureProducerToken",
 ]);
 
 function maskValue(value) {

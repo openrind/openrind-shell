@@ -719,6 +719,17 @@ async function inspectFuseImage(image = FUSE_IMAGE) {
   );
 }
 
+// Content identity of the selected sandbox image for Haloop session capture.
+// Best-effort: an unresolvable digest must not block sandbox creation.
+async function resolveImageDigest(image) {
+  const inspected = await wslRun(
+    ["-d", DISTRO_NAME, "--", "docker", "image", "inspect", image, "--format", "{{.Id}}"],
+    { timeout: 15_000 },
+  ).catch(() => null);
+  const digest = inspected?.stdout?.trim() || "";
+  return /^sha256:[0-9a-f]{64}$/.test(digest) ? digest : "";
+}
+
 async function requireFuseImage(onProgress) {
   // 1. Check if openrind-shell-fuse:local is already present in Docker
   const localInspect = await inspectFuseImage("openrind-shell-fuse:local");
@@ -1005,6 +1016,7 @@ async function provisionOpenrindShellSandbox(options) {
   const haloop = await prepareRequiredHaloop({ name, workspaceId, agent, onProgress });
   const replaced = haloop.replaced;
   const selectedImage = await requireFuseImage(onProgress);
+  const imageDigest = await resolveImageDigest(selectedImage);
   const agentHomeVolume = await ensureAgentHomeVolume(name, workspaceId, agent);
   const driverConfig = JSON.stringify({
     docker: {
@@ -1088,6 +1100,9 @@ async function provisionOpenrindShellSandbox(options) {
       throw new Error(`Invalid Haloop gateway URL: ${haloop.endpoint}`);
     }
     sandboxArgs.push("--env", `HALOOP_GATEWAY_URL=${haloop.endpoint}`);
+  }
+  if (imageDigest) {
+    sandboxArgs.push("--env", `OPENRIND_IMAGE_DIGEST=${imageDigest}`);
   }
   sandboxArgs.push(
     "--no-tty",

@@ -63,12 +63,22 @@ model requests and failures, browser actions, observations, and judge results.
 Model requests go directly to OpenRouter in this developer test. 
 
 **Independent Trace Architecture:**
-The CTF agent **does not use w8-Haloop** and does not emit OTLP evidence over the gateway.
-Instead, it writes all run evidence directly as local JSON/JSONL files (`trajectory.json`,
-`events.jsonl`, `challenge-events.jsonl`) into a local `ctf-traces/` directory within
-the user-selected tasks folder (e.g. `<tasks-dir>/ctf-traces/`). Any browser screenshots
-or DOM artifacts captured for CTF evaluation are stored locally inside this folder.
-CTF trace capture is completely decoupled from the Openrind main app's Haloop gateway.
+The CTF agent **does not use w8-Haloop** for model traffic and does not emit OTLP
+spans over the gateway. Instead, it writes all run evidence directly as local
+JSON/JSONL files (`trajectory.json`, `events.jsonl`, `challenge-events.jsonl`)
+into a local `ctf-traces/` directory within the user-selected tasks folder
+(e.g. `<tasks-dir>/ctf-traces/`). Any browser screenshots or DOM artifacts
+captured for CTF evaluation are stored locally inside this folder.
+
+**Optional collector evidence:** when a collector URL and producer token are
+configured (`OPENRIND_CTF_COLLECTOR_URL` or `HALOOP_COLLECTOR_URL`, or derived
+from `HALOOP_GATEWAY_URL`, plus `W8_CAPTURE_PRODUCER_TOKEN` or
+`HALOOP_CAPTURE_TOKEN`), the agent additionally posts run-level evidence
+to the Haloop collector evidence API at the end of each run: `task.started`,
+the trajectory and challenge-event log as content-addressed artifacts, and an
+`outcome.observed` verdict from the challenge judge (emitted for failed and
+stopped runs too). This path is best-effort: collector failures are logged and
+never fail the run. Without that configuration the agent stays fully local.
 
 ## Tests
 

@@ -37,6 +37,26 @@ export { syncToFs, syncFromFs, watchAndSync } from './sync.js';
 export { createPool } from './db/pool.js';
 export { runMigrations } from './db/migrations.js';
 
+// Workspace change capture (primary FUSE runtime)
+export {
+  EMPTY_WORKSPACE_ROOT,
+  WORKSPACE_MANIFEST_VERSION,
+  diffWorkspaces,
+  emitWorkspacePatch,
+  parseSnapshot,
+  resolveWorkspaceCaptureConfig,
+  serializeSnapshot,
+  snapshotWorkspace,
+} from './workspace-manifest.js';
+export type {
+  WorkspaceCaptureConfig,
+  WorkspaceDiff,
+  WorkspaceDiffChange,
+  WorkspaceDiffModification,
+  WorkspaceManifestEntry,
+  WorkspaceSnapshot,
+} from './workspace-manifest.js';
+
 // Command safety analysis
 export { analyzeCommand, analyzeCommandSync } from './safety.js';
 export type { AnalysisResult, BashInvocation } from './safety.js';

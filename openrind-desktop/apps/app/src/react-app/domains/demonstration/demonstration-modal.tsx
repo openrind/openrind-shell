@@ -6,12 +6,13 @@ import { Button } from "../../design-system/button";
 export type DemonstrationModalProps = {
   isOpen: boolean;
   onClose: () => void;
-  onStart: (opts: { taskTitle: string; scrubPii: boolean; captureIntervalMs: number }) => Promise<void>;
+  onStart: (opts: { taskTitle: string; scrubPii: boolean; captureIntervalMs: number; trainingConsent: boolean }) => Promise<void>;
 };
 
 export function DemonstrationModal({ isOpen, onClose, onStart }: DemonstrationModalProps) {
   const [taskTitle, setTaskTitle] = useState("");
   const [scrubPii, setScrubPii] = useState(true);
+  const [trainingConsent, setTrainingConsent] = useState(false);
   const [intervalSec, setIntervalSec] = useState("1.5");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,6 +32,7 @@ export function DemonstrationModal({ isOpen, onClose, onStart }: DemonstrationMo
         taskTitle: taskTitle.trim(),
         scrubPii,
         captureIntervalMs: Math.round(parseFloat(intervalSec) * 1000) || 1500,
+        trainingConsent,
       });
       onClose();
     } catch (err) {
@@ -94,6 +96,21 @@ export function DemonstrationModal({ isOpen, onClose, onStart }: DemonstrationMo
                 type="checkbox"
                 checked={scrubPii}
                 onChange={(e) => setScrubPii(e.target.checked)}
+                className="h-4 w-4 rounded border-dls-border accent-red-500 cursor-pointer"
+              />
+            </div>
+
+            <div className="flex items-center justify-between border-t border-dls-border/40 pt-3">
+              <div>
+                <span className="font-medium text-dls-text block">Allow Use for Model Training</span>
+                <span className="text-[11px] text-dls-secondary block mt-0.5">
+                  Off records a training opt-out for this session
+                </span>
+              </div>
+              <input
+                type="checkbox"
+                checked={trainingConsent}
+                onChange={(e) => setTrainingConsent(e.target.checked)}
                 className="h-4 w-4 rounded border-dls-border accent-red-500 cursor-pointer"
               />
             </div>

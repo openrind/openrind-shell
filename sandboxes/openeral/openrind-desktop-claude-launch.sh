@@ -36,6 +36,13 @@ if [ -z "${OPENRIND_BROWSER_SERVICE_TOKEN:-}" ] && [ -f /etc/openrind-browser/se
   export OPENRIND_BROWSER_SERVICE_TOKEN="$(cat /etc/openrind-browser/service-token 2>/dev/null || true)"
 fi
 
+# Environment identity for Haloop session capture. The Desktop launcher passes
+# OPENRIND_IMAGE_DIGEST at sandbox create; the TypeScript workspace-manifest
+# side provides OPENRIND_WORKSPACE_HASH. Both may also arrive via session.env
+# sourced above; export them so the agent proxy inherits them.
+export OPENRIND_IMAGE_DIGEST="${OPENRIND_IMAGE_DIGEST:-}"
+export OPENRIND_WORKSPACE_HASH="${OPENRIND_WORKSPACE_HASH:-}"
+
 MARKER_PATH="$RUNTIME_DIR/desktop-claude-launch"
 
 if [ ! -f "$MARKER_PATH" ]; then

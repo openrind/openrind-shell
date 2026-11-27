@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Circle, Monitor, Pause, Play, Square, Video } from "lucide-react";
 import { Button } from "../../../design-system/button";
 
@@ -16,15 +16,26 @@ export type DemonstrationStatusPayload = {
     success: boolean;
     projectId: string;
     taskTitle: string;
+    runId?: string;
     framesCount: number;
     actionsCount: number;
     transmitted: boolean;
   } | null;
 };
 
+type AttestationAnswer = "pending" | "yes" | "no" | "skipped";
+
+function resultKey(result: NonNullable<DemonstrationStatusPayload["result"]>): string {
+  return result.runId || `${result.projectId}:${result.framesCount}:${result.actionsCount}`;
+}
+
 export function DemonstrationSurface() {
   const [status, setStatus] = useState<DemonstrationStatusPayload | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
+  const [attestation, setAttestation] = useState<AttestationAnswer>("pending");
+  // Answers already given per session result. The main process can send the
+  // same result twice; an answered prompt must not reappear.
+  const answeredRef = useRef<Map<string, AttestationAnswer>>(new Map());
 
   useEffect(() => {
     const bridge = (window as any).__OPENRIND_DESKTOP_ELECTRON__;
@@ -35,6 +46,13 @@ export function DemonstrationSurface() {
     });
     return cleanup;
   }, []);
+
+  useEffect(() => {
+    const result = status?.result;
+    if (!result) return;
+    const answered = answeredRef.current.get(resultKey(result));
+    setAttestation(answered ?? "pending");
+  }, [status?.result]);
 
   useEffect(() => {
     if (!status?.recording || status?.session?.isPaused || !status?.session?.startedAt) {
@@ -72,6 +90,26 @@ export function DemonstrationSurface() {
     const bridge = (window as any).__OPENRIND_DESKTOP_ELECTRON__;
     if (bridge?.invokeDesktop) {
       await bridge.invokeDesktop("demonstrationStop");
+    }
+  };
+
+  const handleAttest = (answer: "yes" | "no" | "skip") => {
+    const result = status?.result;
+    if (!result) return;
+    const key = resultKey(result);
+    const value: AttestationAnswer = answer === "skip" ? "skipped" : answer;
+    answeredRef.current.set(key, value);
+    setAttestation(value);
+    if (answer === "skip") return;
+    // Fire and forget: the outcome report must never block the UI. The
+    // session is already stopped and saved at this point.
+    const bridge = (window as any).__OPENRIND_DESKTOP_ELECTRON__;
+    if (bridge?.invokeDesktop) {
+      bridge
+        .invokeDesktop("demonstrationAttestOutcome", { completed: answer === "yes" })
+        .catch((err: unknown) => {
+          console.error("[DemonstrationSurface] Failed to report outcome:", err);
+        });
     }
   };
 
@@ -172,6 +210,46 @@ export function DemonstrationSurface() {
               <span className="font-medium text-emerald-400">Committed to Haloop</span>
             </div>
           </div>
+
+          {/* End-of-session outcome attestation. Optional: Skip (or closing
+              the card) emits nothing and the session keeps its default. */}
+          {attestation === "pending" ? (
+            <div className="rounded-lg border border-dls-border/40 bg-dls-background/40 p-3 space-y-2.5">
+              <p className="text-xs font-medium text-dls-text">
+                Did you complete what you intended?
+              </p>
+              <div className="flex items-center justify-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => handleAttest("yes")}
+                  className="text-xs h-7 px-3 border-dls-border/80"
+                >
+                  Yes
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => handleAttest("no")}
+                  className="text-xs h-7 px-3 border-dls-border/80"
+                >
+                  No
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => handleAttest("skip")}
+                  className="text-xs h-7 px-3 text-dls-secondary"
+                >
+                  Skip
+                </Button>
+              </div>
+            </div>
+          ) : attestation === "yes" || attestation === "no" ? (
+            <p className="text-[11px] text-dls-secondary">
+              Outcome reported: {attestation === "yes" ? "completed" : "not completed"}.
+            </p>
+          ) : null}
 
           <Button
             type="button"

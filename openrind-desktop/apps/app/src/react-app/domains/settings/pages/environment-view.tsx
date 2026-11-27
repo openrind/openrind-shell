@@ -99,6 +99,14 @@ const PREDEFINED_CREDENTIALS: PredefinedCredentialDef[] = [
     placeholder: "admin-token-...",
   },
   {
+    statusKey: "w8CaptureProducerToken",
+    envVarName: "HALOOP_CAPTURE_PRODUCER_TOKEN",
+    label: "HALOOP_CAPTURE_PRODUCER_TOKEN",
+    description:
+      "Producer bearer token for the w8-haloop capture evidence API (/internal/capture/events). Must match a registered producer in W8_CAPTURE_PRODUCERS_JSON on the collector. Used for task demonstration evidence; separate from the admin token.",
+    placeholder: "producer-token-...",
+  },
+  {
     statusKey: "openrindGatewayApiKey",
     envVarName: "OPENRIND_GATEWAY_API_KEY",
     label: "OPENRIND_GATEWAY_API_KEY",
