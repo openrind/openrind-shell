@@ -55,7 +55,8 @@ export type OpenrindShellCredentialKey =
   | "openrindGatewayApiKey"
   | "elevenLabsApiKey"
   | "haloopGatewayUrl"
-  | "w8AdminToken";
+  | "w8AdminToken"
+  | "w8CaptureProducerToken";
 
 export type OpenrindShellCredentialStatus = {
   databaseUrl: "set" | "unset";
@@ -67,6 +68,7 @@ export type OpenrindShellCredentialStatus = {
   elevenLabsApiKey: "set" | "unset";
   haloopGatewayUrl?: "set" | "unset";
   w8AdminToken?: "set" | "unset";
+  w8CaptureProducerToken?: "set" | "unset";
   encryptionAvailable: boolean;
   databaseUrl_masked?: string;
   databaseUrl_updatedAt?: number;
@@ -86,6 +88,8 @@ export type OpenrindShellCredentialStatus = {
   haloopGatewayUrl_updatedAt?: number;
   w8AdminToken_masked?: string;
   w8AdminToken_updatedAt?: number;
+  w8CaptureProducerToken_masked?: string;
+  w8CaptureProducerToken_updatedAt?: number;
 };
 
 export type HaloopRuntimeState =

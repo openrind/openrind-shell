@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
@@ -17,9 +17,9 @@ import {
 const SAMPLE_TRAJECTORY = {
   format: "openrind-ctf-trajectory/v1",
   task: {
-    id: "flag-command",
-    title: "Flag Command",
-    description: "Inspect network traffic to find the secret command.",
+    id: "synthetic-web",
+    title: "Synthetic Web Challenge",
+    description: "Inspect the page and retrieve the hidden flag.",
     sitePath: "/",
   },
   model: "openai/gpt-4o",
@@ -58,7 +58,7 @@ test("TracePack builder creates canonical lossless archive structure", () => {
   assert.equal(manifest.schema_version, "1.0.0");
   assert.equal(manifest.parser_version, "1.0.0");
   assert.equal(manifest.client.name, "Openrind Desktop");
-  assert.equal(manifest.task.id, "flag-command");
+  assert.equal(manifest.task.id, "synthetic-web");
   assert.equal(manifest.capture.sealed, true);
   assert.equal(manifest.capture.complete, true);
 
@@ -111,7 +111,7 @@ test("createTracePackZip creates a valid ZIP buffer with PK signature", () => {
   assert.equal(buffer[1], 0x4b);
   assert.equal(buffer[2], 0x03);
   assert.equal(buffer[3], 0x04);
-  assert.equal(manifest.task.id, "flag-command");
+  assert.equal(manifest.task.id, "synthetic-web");
 });
 
 test("SellTraces projector maintains invariant: no synthesized tool_calls", () => {
@@ -121,7 +121,7 @@ test("SellTraces projector maintains invariant: no synthesized tool_calls", () =
   });
 
   assert.equal(sellTracesJson.source, "local_trace_index");
-  assert.ok(sellTracesJson.sourceId.startsWith("flag-command:"));
+  assert.ok(sellTracesJson.sourceId.startsWith("synthetic-web:"));
   assert.equal(sellTracesJson.model, "openai/gpt-4o");
   assert.ok(sellTracesJson.originalHash);
   assert.ok(sellTracesJson.environment);
@@ -204,7 +204,7 @@ test("Observed model requests in agentEvents preserve real prompt canaries and a
 
   // 1. Session ID parity check between TracePack and SellTraces
   assert.equal(manifest.session_id, sellTracesJson.sessionId);
-  assert.equal(manifest.session_id, "flag-command:1234567890ab");
+  assert.equal(manifest.session_id, "synthetic-web:1234567890ab");
 
   // 2. Canary preservation in conversation.jsonl
   const convFile = files.find((f) => f.path === "tracepack/conversation.jsonl");
@@ -222,20 +222,24 @@ test("Observed model requests in agentEvents preserve real prompt canaries and a
   assert.ok(files.some((f) => f.path === "tracepack/source-records/agent-events.jsonl"));
 });
 
-test("Real trace fixture (flag-command-trajectory.json) processes cleanly", async () => {
-  const fixturePath = join(
-    import.meta.dirname,
-    "../../../../../ctf-traces/flag-command-trajectory.json",
-  );
-  if (!existsSync(fixturePath)) return;
+test("Trajectory JSON loaded from disk processes cleanly", async () => {
+  // Synthetic stand-in for a recorded run: the test writes the trajectory to a
+  // temporary directory instead of reading a bundled trace file.
+  const dir = await mkdtemp(join(tmpdir(), "tracepack-fixture-"));
+  try {
+    const fixturePath = join(dir, "synthetic-web-trajectory.json");
+    await writeFile(fixturePath, JSON.stringify(SAMPLE_TRAJECTORY, null, 2), "utf8");
 
-  const raw = JSON.parse(await readFile(fixturePath, "utf8"));
-  const { files, manifest } = buildTracePackFiles({ trajectory: raw });
-  assert.ok(files.length >= 6);
-  assert.equal(manifest.task.id, "flag-command");
+    const raw = JSON.parse(await readFile(fixturePath, "utf8"));
+    const { files, manifest } = buildTracePackFiles({ trajectory: raw });
+    assert.ok(files.length >= 6);
+    assert.equal(manifest.task.id, "synthetic-web");
 
-  const { sellTracesJson, projectionReport } = projectToSellTraces({ trajectory: raw });
-  assert.ok(sellTracesJson.sourceId.startsWith("flag-command:"));
-  assert.ok(sellTracesJson.messages.length > 5);
-  assert.equal(projectionReport.capture_complete, true);
+    const { sellTracesJson, projectionReport } = projectToSellTraces({ trajectory: raw });
+    assert.ok(sellTracesJson.sourceId.startsWith("synthetic-web:"));
+    assert.ok(sellTracesJson.messages.length > 5);
+    assert.equal(projectionReport.capture_complete, true);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

@@ -3,7 +3,7 @@ import http from 'node:http';
 import https from 'node:https';
 import fs from 'node:fs';
 import { URL, fileURLToPath } from 'node:url';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 
 process.on('uncaughtException', err => {
   console.error('PROXY UNCAUGHT EXCEPTION:', err);
@@ -242,6 +242,47 @@ function readRuntimeEnv() {
   return env;
 }
 
+// --- Collector session evidence ---------------------------------------------
+// The proxy emits task.started at startup and session.closed at shutdown to
+// the Haloop collector evidence API. Best-effort: failures are logged to the
+// proxy log and never crash the proxy.
+//
+// Configuration: collector URL via HALOOP_COLLECTOR_URL / W8_COLLECTOR_URL or
+// derived from the gateway URL (port 8788); producer token via
+// W8_CAPTURE_PRODUCER_TOKEN / HALOOP_CAPTURE_TOKEN / ADMIN_TOKEN (process env
+// or the runtime env files). Environment identity arrives via
+// OPENRIND_IMAGE_DIGEST and OPENRIND_WORKSPACE_HASH (set by the launcher and
+// the TypeScript workspace-manifest side respectively).
+
+const CAPTURE_SCHEMA_VERSION = 1;
+const CAPTURE_PRODUCER_VERSION = 'openrind-haloop-agent-proxy/1.0.0';
+const MAX_CAPTURE_REQUEST_IDS = 10000;
+
+function resolveProducerToken(runtimeEnv) {
+  return (
+    process.env.W8_CAPTURE_PRODUCER_TOKEN ||
+    process.env.HALOOP_CAPTURE_TOKEN ||
+    runtimeEnv.W8_CAPTURE_PRODUCER_TOKEN ||
+    runtimeEnv.HALOOP_CAPTURE_TOKEN ||
+    process.env.ADMIN_TOKEN ||
+    process.env.W8_ADMIN_TOKEN ||
+    process.env.W8_BYOH_ADMIN_TOKEN ||
+    runtimeEnv.ADMIN_TOKEN ||
+    runtimeEnv.W8_ADMIN_TOKEN ||
+    runtimeEnv.W8_BYOH_ADMIN_TOKEN ||
+    ''
+  ).trim();
+}
+
+function environmentIdentity(runtimeEnv) {
+  return {
+    image_digest: (process.env.OPENRIND_IMAGE_DIGEST || runtimeEnv.OPENRIND_IMAGE_DIGEST || '').trim() || null,
+    workspace_hash: (process.env.OPENRIND_WORKSPACE_HASH || runtimeEnv.OPENRIND_WORKSPACE_HASH || '').trim() || null,
+    platform: `${process.platform}/${process.arch}`,
+    node_version: process.version,
+  };
+}
+
 export function createHaloopAgentProxy(options = {}) {
   let targetBase = options.targetBase || process.env.HALOOP_UPSTREAM_URL || process.env.HALOOP_GATEWAY_URL || '';
   if (targetBase.includes(':8785') || targetBase.includes('127.0.0.1:8785')) {
@@ -278,6 +319,115 @@ export function createHaloopAgentProxy(options = {}) {
   }
   if (!proxySessionId) {
     proxySessionId = randomBytes(16).toString('hex');
+  }
+
+  // Session evidence state. requestIds collects every per-call request_id the
+  // proxy stamps on outbound metadata; session.closed reports them as the
+  // expected request inventory.
+  const capture = {
+    requestIds: new Set(),
+    started: false,
+    closed: false,
+  };
+
+  function captureConfig() {
+    const runtimeEnv = readRuntimeEnv();
+    const collectorUrl = resolveCollectorUrl('');
+    const token = resolveProducerToken(runtimeEnv);
+    return { collectorUrl, token, project: resolveProjectName(), enabled: Boolean(collectorUrl && token) };
+  }
+
+  function recordRequestId(id) {
+    if (id && capture.requestIds.size < MAX_CAPTURE_REQUEST_IDS) {
+      capture.requestIds.add(id);
+    }
+  }
+
+  async function postCaptureEvent(cfg, { eventId, data }) {
+    const envelope = {
+      schema_version: CAPTURE_SCHEMA_VERSION,
+      project: cfg.project,
+      session_id: proxySessionId,
+      event_id: eventId,
+      occurred_at: new Date().toISOString(),
+      producer_version: CAPTURE_PRODUCER_VERSION,
+      data,
+    };
+    const res = await fetch(`${cfg.collectorUrl}/internal/capture/events`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.token}` },
+      body: JSON.stringify(envelope),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`collector /internal/capture/events HTTP ${res.status}: ${text.slice(0, 200)}`);
+    }
+  }
+
+  async function emitSessionStarted() {
+    if (capture.started) return;
+    capture.started = true;
+    const cfg = captureConfig();
+    if (!cfg.enabled) {
+      console.error('[haloop-proxy] capture: collector URL or producer token not configured; session evidence will not be recorded');
+      return;
+    }
+    const identity = environmentIdentity(readRuntimeEnv());
+    const harnessName = (process.env.OPENRIND_AGENT_HARNESS || process.env.OPENRIND_SHELL_AGENT || 'agent').trim() || 'agent';
+    try {
+      const manifestJson = JSON.stringify({ ...identity, sandbox: cfg.project, captured_at: new Date().toISOString() });
+      const manifestSha256 = createHash('sha256').update(manifestJson, 'utf8').digest('hex');
+      const artifactId = `env-${proxySessionId}`.slice(0, 128);
+      await postCaptureEvent(cfg, {
+        eventId: `evt-${proxySessionId}-env`,
+        data: {
+          type: 'artifact.recorded',
+          artifact_id: artifactId,
+          kind: 'environment_manifest',
+          content: manifestJson,
+          content_type: 'application/json',
+          sha256: manifestSha256,
+          boundary: 'initial',
+        },
+      });
+      await postCaptureEvent(cfg, {
+        eventId: `evt-${proxySessionId}-started`,
+        data: {
+          type: 'task.started',
+          task_id: `sandbox-session:${cfg.project}`.slice(0, 256),
+          attempt_id: proxySessionId.slice(0, 256),
+          domain: 'other',
+          instruction: `Interactive ${harnessName} agent session in Openrind sandbox ${cfg.project}`,
+          harness: { name: harnessName, version: CAPTURE_PRODUCER_VERSION },
+          environment_artifact_id: artifactId,
+        },
+      });
+      console.error(`[haloop-proxy] capture: task.started recorded for session ${proxySessionId}`);
+    } catch (err) {
+      console.error(`[haloop-proxy] capture: failed to record session start: ${err.message}`);
+    }
+  }
+
+  async function emitSessionClosed(reason) {
+    if (capture.closed) return;
+    capture.closed = true;
+    const cfg = captureConfig();
+    if (!cfg.enabled) return;
+    try {
+      await postCaptureEvent(cfg, {
+        eventId: `evt-${proxySessionId}-closed`,
+        data: {
+          type: 'session.closed',
+          reason,
+          expected_request_ids: [...capture.requestIds],
+          capture_gaps: capture.started ? [] : ['session start was not recorded'],
+        },
+      });
+      console.error(`[haloop-proxy] capture: session.closed (${reason}) recorded for session ${proxySessionId}`);
+    } catch (err) {
+      console.error(`[haloop-proxy] capture: failed to record session close: ${err.message}`);
+    }
   }
 
   function sendUpstream(reqPath, reqMethod, reqHeaders, callback) {
@@ -377,6 +527,12 @@ export function createHaloopAgentProxy(options = {}) {
     req.on('data', c => chunks.push(c));
     req.on('end', () => {
       const runtimeEnv = readRuntimeEnv();
+      const envIdentity = environmentIdentity(runtimeEnv);
+      const identityMetadata = {
+        platform: envIdentity.platform,
+        ...(envIdentity.image_digest ? { image_digest: envIdentity.image_digest } : {}),
+        ...(envIdentity.workspace_hash ? { workspace_hash: envIdentity.workspace_hash } : {}),
+      };
       const currentGateway = (
         runtimeEnv.HALOOP_GATEWAY_URL ||
         runtimeEnv.W8_GATEWAY_URL ||
@@ -564,7 +720,8 @@ export function createHaloopAgentProxy(options = {}) {
         const projectName = resolveProjectName();
         const collectorUrl = resolveCollectorUrl(currentGateway);
         const sessionContext = process.env.OPENRIND_HALOOP_SESSION_CONTEXT || req.headers['x-openrind-haloop-session'] || '';
-        const outboundRequestId = `req_${crypto.randomBytes(8).toString('hex')}`;
+        const outboundRequestId = `req_${randomBytes(8).toString('hex')}`;
+        recordRequestId(outboundRequestId);
         const forwardHeaders = {
           'content-type': 'application/json',
           'content-length': Buffer.byteLength(openAiPayload),
@@ -575,6 +732,7 @@ export function createHaloopAgentProxy(options = {}) {
             session_id: proxySessionId,
             trace_id: proxySessionId,
             request_id: outboundRequestId,
+            ...identityMetadata,
           }),
           ...(collectorUrl ? {
             'x-w8-haloop-config': JSON.stringify({
@@ -862,12 +1020,14 @@ export function createHaloopAgentProxy(options = {}) {
         const projectName = resolveProjectName();
         const collectorUrl = resolveCollectorUrl(currentGateway);
         const sessionContext = process.env.OPENRIND_HALOOP_SESSION_CONTEXT || req.headers['x-openrind-haloop-session'] || '';
+        const outboundRequestId = `req_${randomBytes(8).toString('hex')}`;
+        recordRequestId(outboundRequestId);
         const forwardHeaders = {
           'content-type': 'application/json',
           'content-length': Buffer.byteLength(openAiPayload),
           'x-w8-haloop-provider': messagesRoute.provider,
           ...(adminToken ? { 'x-w8-haloop-admin-token': adminToken } : {}),
-          'x-w8-haloop-metadata': JSON.stringify({ project: projectName, session_id: proxySessionId, trace_id: proxySessionId }),
+          'x-w8-haloop-metadata': JSON.stringify({ project: projectName, session_id: proxySessionId, trace_id: proxySessionId, request_id: outboundRequestId, ...identityMetadata }),
           ...(collectorUrl ? {
             'x-w8-haloop-config': JSON.stringify({
               input_guardrails: [{ 'halo.mark': { collectorURL: collectorUrl }, async: false, deny: false }],
@@ -1322,10 +1482,12 @@ export function createHaloopAgentProxy(options = {}) {
       const projectName = resolveProjectName();
       const collectorUrl = resolveCollectorUrl(currentGateway);
       const sessionContext = process.env.OPENRIND_HALOOP_SESSION_CONTEXT || req.headers['x-openrind-haloop-session'] || '';
+      const outboundRequestId = `req_${randomBytes(8).toString('hex')}`;
+      recordRequestId(outboundRequestId);
       const headers = { ...req.headers };
       headers['x-w8-haloop-provider'] = passthroughRoute.provider || provider;
       headers['x-w8-haloop-admin-token'] = adminToken;
-      headers['x-w8-haloop-metadata'] = JSON.stringify({ project: projectName, session_id: proxySessionId, trace_id: proxySessionId });
+      headers['x-w8-haloop-metadata'] = JSON.stringify({ project: projectName, session_id: proxySessionId, trace_id: proxySessionId, request_id: outboundRequestId, ...identityMetadata });
       if (collectorUrl) {
         headers['x-w8-haloop-config'] = JSON.stringify({
           input_guardrails: [{ 'halo.mark': { collectorURL: collectorUrl }, async: false, deny: false }],
@@ -1379,10 +1541,32 @@ export function createHaloopAgentProxy(options = {}) {
     }
   });
 
+  // Embedders (and the main-module entry below) drive the session lifecycle
+  // through this handle; request handlers only collect request ids.
+  server.haloopCapture = { emitSessionStarted, emitSessionClosed, recordRequestId };
+
   return server;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const server = createHaloopAgentProxy();
-  server.listen(8785, '127.0.0.1', () => {});
+  server.listen(8785, '127.0.0.1', () => {
+    void server.haloopCapture.emitSessionStarted();
+  });
+  let shuttingDown = false;
+  const shutdown = (reason) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    const forceExit = setTimeout(() => process.exit(0), 4000);
+    Promise.resolve(server.haloopCapture.emitSessionClosed(reason))
+      .catch(() => {})
+      .finally(() => {
+        clearTimeout(forceExit);
+        process.exit(0);
+      });
+  };
+  // The launcher stops the proxy after the agent exits (SIGTERM) or forwards
+  // the user's interrupt (SIGINT); capture must not delay exit for long.
+  process.on('SIGTERM', () => shutdown('completed'));
+  process.on('SIGINT', () => shutdown('cancelled'));
 }

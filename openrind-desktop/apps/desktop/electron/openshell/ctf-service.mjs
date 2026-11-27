@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import http from "node:http";
 import { basename, dirname, join, resolve } from "node:path";
 
@@ -12,6 +12,7 @@ import { createTracePackZip } from "./tracepack-builder.mjs";
 import { projectToSellTraces } from "./selltraces-projector.mjs";
 import { generateHarborTaskFromTrajectory } from "./generate-harbor-task.mjs";
 import { getAllTasks, registerDynamicTask } from "./ctf-tasks.mjs";
+import { checkTrajectoryIntegrity, emitCtfRunEvidence, resolveCtfCaptureConfig } from "./ctf-evidence.mjs";
 
 const DEFAULT_CTF_MODEL = "openai/gpt-4o";
 
@@ -106,17 +107,6 @@ export function normalizeModelName(rawModel, isAnthropic = false) {
   return m || DEFAULT_CTF_MODEL;
 }
 
-// Built-in benchmark images mapped to their task ID
-const BENCHMARK_IMAGES = {
-  "flag-command": "openrind-ctf-flag-command:e2e",
-  "glacier-exchange": "openrind-ctf-glacier-exchange:e2e",
-  "amoebananas": "openrind-ctf-amoebananas:e2e",
-  "client-secrets": "openrind-ctf-client-secrets:e2e",
-  "cookie-clicker": "openrind-ctf-cookie-clicker:e2e",
-  "myflask-traversal": "openrind-ctf-myflask-traversal:e2e",
-  "python-ssti": "openrind-ctf-python-ssti:e2e",
-};
-
 async function runDocker(args, options = {}) {
   const { timeout = 60_000, onOutput } = options;
   return new Promise((resolve) => {
@@ -170,6 +160,28 @@ async function getUserCtfDir() {
     if (app?.getPath) return join(app.getPath("userData"), "ctf");
   } catch {}
   return join(process.env.APPDATA || process.env.HOME || ".", ".openrind", "ctf");
+}
+
+// Temp-file + rename so a crash mid-write never leaves a torn trajectory or
+// events file behind (mirrors writeAtomic in the CTF runtime package).
+async function writeFileAtomic(path, content) {
+  const temporary = `${path}.pending`;
+  await writeFile(temporary, content, "utf8");
+  await rename(temporary, path);
+}
+
+// Env-first collector config; falls back to the stored Haloop gateway/admin
+// credentials so the Desktop flow works without extra environment setup.
+async function resolveCtfCaptureConfigWithCredentials() {
+  let config = resolveCtfCaptureConfig(process.env);
+  if (config.enabled) return config;
+  let gatewayUrl = "";
+  let adminToken = "";
+  try { gatewayUrl = (await getCredential("haloopGatewayUrl")) || ""; } catch {}
+  try { adminToken = (await getCredential("w8AdminToken")) || ""; } catch {}
+  if (!gatewayUrl && !adminToken) return config;
+  config = resolveCtfCaptureConfig(process.env, { gatewayUrl, adminToken });
+  return config;
 }
 
 let activeRunAbort = null;
@@ -437,7 +449,7 @@ async function scanDirectoryForChallenges(rootDir, maxDepth = 4) {
               folderPath: taskFolder,
               backendPort: Number(item.internal_port || item.backendPort || known?.backendPort || 8080),
               sitePath: known?.sitePath || "/",
-              image: known?.image || BENCHMARK_IMAGES[id] || `openrind-ctf-${id}:local`,
+              image: known?.image || `openrind-ctf-${id}:local`,
               flag: item.flag || known?.flag || "",
               isCustom: true,
               browserRules: known?.browserRules || [
@@ -466,7 +478,7 @@ async function scanDirectoryForChallenges(rootDir, maxDepth = 4) {
     const folderBase = basename(currentDir);
     const id = folderBase.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
 
-    // 1. Direct match with a known benchmark challenge (e.g. client-secrets, cookie-clicker, flag-command)
+    // 1. Direct match with a previously registered task for this directory id
     const known = knownTaskMap.get(id);
     if (known) {
       let flag = known.flag || "";
@@ -493,7 +505,7 @@ async function scanDirectoryForChallenges(rootDir, maxDepth = 4) {
         category: known.category || "web",
         backendPort: known.backendPort || 8080,
         sitePath: known.sitePath || "/",
-        image: known.image || BENCHMARK_IMAGES[known.id] || `openrind-ctf-${known.id}:local`,
+        image: known.image || `openrind-ctf-${known.id}:local`,
         flag: flag || known.flag || "",
         folderPath: currentDir,
         isCustom: true,
@@ -1048,7 +1060,7 @@ export function createCtfService() {
       const results = [];
 
       for (const t of targetTasks) {
-        const imageName = t.image || BENCHMARK_IMAGES[t.id] || `openrind-ctf-${t.id}:local`;
+        const imageName = t.image || `openrind-ctf-${t.id}:local`;
         const traceFile = await findTraceFile(t.id);
         let solved = false;
         let traceSummary = null;
@@ -1095,7 +1107,6 @@ export function createCtfService() {
       if (!task) return false;
       const candidates = [
         task.image,
-        BENCHMARK_IMAGES[task.id],
         `openrind-ctf-${task.id}:e2e`,
         `openrind-ctf-${task.id}:local`,
       ].filter(Boolean);
@@ -1404,7 +1415,6 @@ export function createCtfService() {
       let effectiveImage = task.image;
       const candidates = [
         task.image,
-        BENCHMARK_IMAGES[task.id],
         `openrind-ctf-${task.id}:e2e`,
         `openrind-ctf-${task.id}:local`,
       ].filter(Boolean);
@@ -1435,9 +1445,12 @@ export function createCtfService() {
       onStatus?.({ phase: "starting", message: `Starting container on port ${hostPort}...` });
 
       let runRes;
-      const isBenchmarkImage = imageName.includes(":e2e") || (BENCHMARK_IMAGES[task.id] && imageName === BENCHMARK_IMAGES[task.id]);
-      if (isBenchmarkImage) {
-        // Benchmark challenge container: run with challenge.mjs reverse proxy & judge
+      // Challenge-proxy images (`:e2e`, built from sandboxes/ctf-challenge/Dockerfile)
+      // run challenge.mjs with its reverse proxy and judge. Other images run the
+      // raw app and the run falls back to direct flag comparison.
+      const usesChallengeProxy = imageName.includes(":e2e");
+      if (usesChallengeProxy) {
+        // Challenge proxy container: run with challenge.mjs reverse proxy & judge
         runRes = await runDocker([
           "run",
           "-d",
@@ -1482,6 +1495,9 @@ export function createCtfService() {
       const runStart = Date.now();
       const modelCallsJournal = [];
       const runId = `ctf-${task.id}-${runStart}`;
+      // Resolved once the API key is known; hoisted so saveTraces (defined
+      // outside the try block) can record the model actually used.
+      let effectiveModel = model;
       const steps = [];
       const challengeEvents = [];
       let solved = false;
@@ -1505,20 +1521,27 @@ export function createCtfService() {
 
       const saveTraces = async (wasSolved, flag, wasStopped = false) => {
         const finishedAt = new Date().toISOString();
-        const submitStep = steps.find(s => s.tool === "submit" || (s.action && s.action.flag));
+        const sessionId = `${task.id}:${runId.slice(-12)}`;
+        // The accepted submission is the LAST submit step; an earlier rejected
+        // attempt must not become the run's submittedAt.
+        const submitStep = steps.findLast(s => s.tool === "submit" || (s.action && s.action.flag));
         const submittedAtTime = submitStep?.at || finishedAt;
         const trajectory = {
           format: "openrind-ctf-trajectory/v1",
           runId,
-          sessionId: `${task.id}:${runId.slice(-12)}`,
+          sessionId,
           status: wasStopped ? "stopped" : "completed",
           task: {
             id: task.id,
             title: task.title,
             description: task.description,
             sitePath: task.sitePath,
+            image: imageName,
+            backendPort: task.backendPort || 8080,
+            ...(task.license ? { license: task.license } : {}),
+            redistributable: task.redistributable !== false,
           },
-          model,
+          model: effectiveModel,
           startedAt: new Date(runStart).toISOString(),
           completedAt: finishedAt,
           solved: wasSolved,
@@ -1533,7 +1556,6 @@ export function createCtfService() {
         };
 
         try {
-          const trajectoryJson = JSON.stringify(trajectory, null, 2);
           const combinedEvents = [
             ...modelCallsJournal.map(mc => ({
               kind: "model_call",
@@ -1546,6 +1568,8 @@ export function createCtfService() {
               origin: "agent",
               observer: "agent",
               relayed_by: "direct-client",
+              runId,
+              sessionId,
             })),
             ...steps.map((s) => ({
               kind: "agent_step",
@@ -1560,8 +1584,21 @@ export function createCtfService() {
               executor: s.executor || (s.action?.action === "eval" ? "mock_dom_eval" : "host_http_adapter"),
               origin: "agent",
               observer: "agent",
+              ...(s.degraded ? { degraded: true } : {}),
+              runId,
+              sessionId,
             }))
           ];
+
+          // Run-pairing self-check: trajectory and agent events must describe
+          // the same run, with real timestamps. Recorded in the trajectory so
+          // downstream consumers can filter degraded evidence.
+          trajectory.integrity = checkTrajectoryIntegrity(trajectory, combinedEvents);
+          if (!trajectory.integrity.ok) {
+            console.error(`[CTF] trajectory integrity problems for ${runId}: ${trajectory.integrity.problems.join("; ")}`);
+          }
+
+          const trajectoryJson = JSON.stringify(trajectory, null, 2);
           const agentEventsLines = combinedEvents.map((e) => JSON.stringify(e)).join("\n") + "\n";
 
           const challengeEventsLines = (challengeEvents.length > 0 ? challengeEvents : [
@@ -1581,18 +1618,49 @@ export function createCtfService() {
 
           if (targetDir) {
             await mkdir(targetDir, { recursive: true });
-            await writeFile(join(targetDir, `${task.id}-trajectory.json`), trajectoryJson, "utf8");
-            await writeFile(join(targetDir, `${task.id}-agent-events.jsonl`), agentEventsLines, "utf8");
-            await writeFile(join(targetDir, `${task.id}-challenge-events.jsonl`), challengeEventsLines, "utf8");
+            await writeFileAtomic(join(targetDir, `${task.id}-trajectory.json`), trajectoryJson);
+            await writeFileAtomic(join(targetDir, `${task.id}-agent-events.jsonl`), agentEventsLines);
+            await writeFileAtomic(join(targetDir, `${task.id}-challenge-events.jsonl`), challengeEventsLines);
           }
 
           // 2. Also save to user appdata traces
           const userDir = await getUserCtfDir();
           const tracesDir = join(userDir, "traces");
           await mkdir(tracesDir, { recursive: true });
-          await writeFile(join(tracesDir, `${task.id}-trajectory.json`), trajectoryJson, "utf8");
+          await writeFileAtomic(join(tracesDir, `${task.id}-trajectory.json`), trajectoryJson);
         } catch (err) {
           console.error("Failed to save trajectory:", err);
+        }
+
+        // 3. Collector evidence (task.started, artifacts, outcome.observed).
+        //    Best-effort: a collector outage must never fail the CTF run.
+        try {
+          const captureConfig = await resolveCtfCaptureConfigWithCredentials();
+          if (captureConfig.enabled) {
+            const challengeEventsJsonl = (challengeEvents.length > 0 ? challengeEvents : [
+              {
+                kind: "judge",
+                at: finishedAt,
+                actor: task.id,
+                submission: flag,
+                correct: wasSolved,
+              }
+            ]).map((e) => JSON.stringify(e)).join("\n") + "\n";
+            await emitCtfRunEvidence({
+              config: captureConfig,
+              task,
+              runId,
+              sessionId,
+              model: effectiveModel,
+              solved: wasSolved,
+              stopped: wasStopped,
+              trajectoryJson: JSON.stringify(trajectory, null, 2),
+              challengeEventsJsonl,
+              verifierName: "challenge-server.mjs",
+            });
+          }
+        } catch (err) {
+          console.error("[CTF evidence] unexpected emitter failure:", err);
         }
         return trajectory;
       };
@@ -1635,7 +1703,7 @@ export function createCtfService() {
           throw new Error("Missing API key. Please configure ANTHROPIC_API_KEY or OPENROUTER_API_KEY in Settings → Environment.");
         }
 
-        const effectiveModel = normalizeModelName(model, keyInfo.isAnthropic);
+        effectiveModel = normalizeModelName(model, keyInfo.isAnthropic);
         onStatus?.({ phase: "running", message: `Executing CTF agent (${effectiveModel} via ${keyInfo.provider})...` });
 
         const siteUrl = `http://127.0.0.1:${hostPort}`;
@@ -1801,7 +1869,11 @@ Return only valid JSON matching the schema. Keep thoughts concise (1-2 sentences
 
           if (activeRunAbort?.signal?.aborted) break;
 
-          const thought = modelAction.thought || modelAction.reasoning || "Analyzing next step...";
+          const rawThought = modelAction.thought || modelAction.reasoning || "";
+          const thought = rawThought || "Analyzing next step...";
+          // Steps with a placeholder thought carry no real reasoning; mark
+          // them so downstream consumers can filter degraded evidence.
+          const thoughtDegraded = !rawThought;
           let tool = String(modelAction.tool || "browser").toLowerCase();
           let actionType = String(modelAction.action || "open").toLowerCase();
           if (actionType === "get") actionType = "open";
@@ -1815,8 +1887,7 @@ Return only valid JSON matching the schema. Keep thoughts concise (1-2 sentences
           }
 
           let flagToSubmit = (modelAction.flag || targetPath || "").trim();
-          const flagMatch = flagToSubmit.match(/(?:gctf|HTB|utflag|SEKAI|picoCTF)\{[^}]+\}/i) ||
-                            flagToSubmit.match(/pseudopods_are_da_bomb|all_javascript_is_open/i);
+          const flagMatch = flagToSubmit.match(/(?:gctf|HTB|utflag|SEKAI|picoCTF)\{[^}]+\}/i);
           if (flagMatch) {
             flagToSubmit = flagMatch[0];
             tool = "submit";
@@ -1903,6 +1974,7 @@ Return only valid JSON matching the schema. Keep thoughts concise (1-2 sentences
               action: { flag: flagToSubmit },
               observation,
               rawObservation: observation,
+              ...(thoughtDegraded ? { degraded: true } : {}),
               durationMs: turnDuration,
             };
             steps.push(step);
@@ -2042,6 +2114,7 @@ Return only valid JSON matching the schema. Keep thoughts concise (1-2 sentences
               observation,
               rawObservation: currentPageBody || observation,
               ...(screenshotArtifact ? { screenshot: screenshotArtifact } : {}),
+              ...(thoughtDegraded ? { degraded: true } : {}),
               durationMs: turnDuration,
             };
             steps.push(step);
@@ -2133,6 +2206,15 @@ Return only valid JSON matching the schema. Keep thoughts concise (1-2 sentences
           challengeEvents = raw.split("\n").filter(Boolean).map(l => JSON.parse(l));
         } catch {}
       }
+      // Flag (never refuse) trace bundles whose files came from different
+      // runs: mismatched session/run ids, mixed models, or impossible
+      // timestamps are reported so the UI/export can warn the user.
+      const pairing = trajectory
+        ? checkTrajectoryIntegrity(trajectory, agentEvents)
+        : { ok: false, problems: ["trajectory file missing or unreadable"] };
+      if (!pairing.ok) {
+        console.error(`[CTF] trace bundle ${taskId} failed pairing check: ${pairing.problems.join("; ")}`);
+      }
       return {
         trajectory,
         agentEvents,
@@ -2142,6 +2224,7 @@ Return only valid JSON matching the schema. Keep thoughts concise (1-2 sentences
           agentEvents: existsSync(agentEventsPath),
           challengeEvents: existsSync(challengeEventsPath),
         },
+        pairing,
       };
     },
 

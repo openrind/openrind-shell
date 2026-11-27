@@ -222,21 +222,26 @@ check capture counters before claiming a trace exists. Desktop cleanup closes
 agents and revokes scoped providers before it removes a sandbox. Use that managed
 cleanup for Desktop-owned resources.
 
-## Trace Architecture: Dual Capture Paths
+## Trace Architecture: Capture Paths
 
-To avoid architectural confusion, Openrind maintains two distinct, independent trace
-capture paths based on the execution context:
+Openrind captures traces on several paths. Each path matches one execution
+context. The evidence paths write to the same collector evidence API
+(`POST /internal/capture/events` and `POST /artifacts` on the Haloop collector,
+port 8788) when they are configured. Producer authentication uses a registered
+producer bearer token, not the admin token.
 
 ### 1. Managed Sandbox Agents (Claude Code, OpenClaw, OpenHands)
 - **Engine:** Traces are captured live via the **w8-Haloop gateway** and its private collector (`openrind-desktop-haloop-collector`).
 - **Data Flow:** `Agent process` -> `haloop-agent-proxy.mjs` (in-sandbox compatibility proxy) -> `OpenShell egress` -> `w8-Haloop gateway (host.openshell.internal:8787)` -> `Haloop Collector (port 8788)` -> `.traces.jsonl`.
+- **Session Evidence:** The in-sandbox proxy also emits lifecycle evidence. At startup it records an `environment_manifest` artifact (image digest from `OPENRIND_IMAGE_DIGEST`, workspace hash from `OPENRIND_WORKSPACE_HASH`, platform) and a `task.started` that links it. At shutdown it emits `session.closed` with `expected_request_ids`: the per-call request IDs the proxy stamped on outbound metadata. The Desktop launcher sets the image digest at sandbox create. The TypeScript CLI sets the workspace hash (see path 4). Emission is best-effort and never blocks the agent.
 - **Scope & Gaps:** All model context, tool inputs/outputs, streaming tokens, and execution traces for interactive coding agents are captured here. Gaps in model request/response fidelity or token counts are resolved exclusively at the `haloop-agent-proxy.mjs` and `w8-haloop` gateway layers.
 - **Filesystem Role:** The PostgreSQL FUSE mount (`/sandbox/work`) serves strictly as standard POSIX filesystem storage for project workspace files. It is not an append-only trace database or audit recorder.
 
 ### 2. Standalone CTF Agent (`openrind-desktop/packages/ctf-runtime/src`)
-- **Engine:** Completely independent of the w8-Haloop gateway. It does **not** use `w8-haloop` (in `agent.mjs`, `modelMode: 'haloop'` throws `HALOOP_CTF_PROFILE_NOT_IMPLEMENTED`).
+- **Engine:** Model traffic stays independent of the w8-Haloop gateway (`modelMode: 'haloop'` throws `HALOOP_CTF_PROFILE_NOT_IMPLEMENTED`).
 - **Data Flow:** The CTF runner talks directly to upstream model endpoints (e.g., OpenRouter via curl) and directly drives `agent-browser` in Chromium.
-- **Storage:** Traces are written directly to local files (`trajectory.json`, `events.jsonl`, `challenge-events.jsonl`) inside a local `ctf-traces/` folder within the selected tasks workspace directory (e.g., `<tasks-dir>/ctf-traces/`).
+- **Storage:** Traces are written directly to local files (`trajectory.json`, `events.jsonl`, `challenge-events.jsonl`) inside a local `ctf-traces/` folder within the selected tasks workspace directory (e.g., `<tasks-dir>/ctf-traces/`). Each trajectory carries an `integrity` self-check (run pairing, monotonic steps, real timestamps).
+- **Collector Evidence:** Both CTF runtimes (Desktop `ctf-service.mjs` and the in-sandbox `agent.mjs`) also emit run-level evidence at the end of each run: `task.started`, the trajectory and the challenge-event log as content-addressed artifacts (`artifact.recorded`, kinds `other` and `verifier_log`), and `outcome.observed` with origin `verifier` and the real judge verdict. Failed and stopped runs emit too. Config: `OPENRIND_CTF_COLLECTOR_URL` / `HALOOP_COLLECTOR_URL` (or derived from `HALOOP_GATEWAY_URL`, port 8788) plus `W8_CAPTURE_PRODUCER_TOKEN` / `HALOOP_CAPTURE_TOKEN`. Without config the agent stays fully local. Emission never fails a run.
 - **Browser Artifacts:** Any browser screenshots or DOM snapshot artifacts for CTF tasks are captured and persisted locally into `ctf-traces/` by `packages/ctf-runtime/src/agent.mjs`. Modifications to `w8-haloop` do not affect the CTF agent, and CTF local file requirements do not dictate FUSE or gateway architecture.
 
 ### 3. OS-Level Desktop Demonstration Recorder (`demonstration-recorder.mjs`)
@@ -245,9 +250,17 @@ capture paths based on the execution context:
 - **Normalized Relative Coordinates:** Records both global virtual-desktop coordinates `(cursor.x, cursor.y)` and frame-relative coordinates `(cursor.relativeX, cursor.relativeY)` mapped to the active monitor, eliminating out-of-bounds coordinates on multi-screen setups.
 - **Settled Frame Alignment:** Enforces a 100ms settling delay before capturing post-action frames (`frame_after`), ensuring the OS and GPU finish repainting window elements (e.g., typed text, focused controls) so that `before_ts < action_ts < settled_after_ts`.
 - **Pre-Capture PII Redaction:** Sanitizes typed keystroke chunks and active window titles before embedding them into `screen_observation.action.text` and `human_action.text`.
+- **Privacy Controls:** Windows owned by password managers are never captured (`DEFAULT_EXCLUDED_PROCESSES`, extended by `OPENRIND_VLA_EXCLUDED_PROCESSES`). `OPENRIND_VLA_MASK_REGIONS` blacks out configured screen regions before frame encode. When the active-window title is unreadable, typed text is masked for that interval. Training use is opt-in; each session records `policy.recorded` with the consent state.
+- **Evidence Schema Conformance:** Host events posted to `/internal/capture/events` use only valid evidence types (`task.started`, `policy.recorded`, `session.closed`, `outcome.observed`, `artifact.recorded`). `human_action` and `screen_observation` remain span-only. The producer token comes from `HALOOP_CAPTURE_PRODUCER_TOKEN` or the `w8CaptureProducerToken` credential.
+- **Outcome Attestation:** After a session stops, the app asks once whether the user completed the intended task. Yes or No is emitted as `outcome.observed` with origin `self_report` and verifier `desktop-user-attestation`. Skip emits nothing.
 - **Artifact Streaming:** Screen frames are asynchronously streamed to the collector (`POST /artifacts`) with SHA-256 deduplication and accessible over HTTP at `/artifacts/{id}`.
 
-### 4. Desktop Observability & Analytics Dashboard (`haloop-analytics-view.tsx`)
+### 4. Workspace Change Capture (`openeral-js/src/workspace-manifest.ts`)
+- **Engine:** TypeScript-side capture over the `_openeral.fs_*` tables. No Rust change.
+- **Data Flow:** At CLI launch, `snapshotWorkspace` reads the FUSE volume and computes a merkle-style root hash. The CLI passes it into the sandbox as `OPENRIND_WORKSPACE_HASH` (see path 1). At session end, `diffWorkspaces` renders added, modified, and deleted files as unified-diff text, and `emitWorkspacePatch` posts the diff as a content-addressed `model_patch` artifact (`patch_basis: initial_workspace`). Manual use: `openrind-shell workspace-manifest snapshot|diff`.
+- **Gap:** The Desktop Electron flow does not yet compute `OPENRIND_WORKSPACE_HASH`. Only the `openrind-shell` CLI launch flow sets it.
+
+### 5. Desktop Observability & Analytics Dashboard (`haloop-analytics-view.tsx`)
 - **Location:** Accessible in Openrind Desktop under **Settings -> Observability**.
 - **Dynamic Discovery:** Discovers and lists all project workspaces from `GET /projects` with an in-app searchable dropdown bounded to the desktop viewport.
 - **Real-Time Telemetry & Charts:**

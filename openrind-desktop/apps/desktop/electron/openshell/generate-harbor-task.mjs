@@ -27,22 +27,12 @@ import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { deflateRawSync, gzipSync } from "node:zlib";
 
 const HARBOR_SCHEMA_VERSION = "1.5";
 const ATIF_SCHEMA_VERSION = "ATIF-v1.8";
 const DEFAULT_PYTHON_IMAGE = "python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de";
-
-const BENCHMARK_IMAGES = {
-  "flag-command": "openrind-ctf-flag-command:e2e",
-  "glacier-exchange": "openrind-ctf-glacier-exchange:e2e",
-  "amoebananas": "openrind-ctf-amoebananas:e2e",
-  "client-secrets": "openrind-ctf-client-secrets:e2e",
-  "cookie-clicker": "openrind-ctf-cookie-clicker:e2e",
-  "myflask-traversal": "openrind-ctf-myflask-traversal:e2e",
-  "python-ssti": "openrind-ctf-python-ssti:e2e",
-};
 
 // CRC-32 table for pure Node.js ZIP creation
 const CRC_TABLE = new Uint32Array(256);
@@ -225,17 +215,9 @@ export async function extractTaskWorkspaceFiles(task, targetFlag) {
   const files = [];
   const taskId = String(task?.id || "").toLowerCase();
 
-  const userProfile = process.env.USERPROFILE || homedir();
   const candidateDirs = [
     task?.folderPath,
     join(process.cwd(), "tasks", taskId),
-    join(process.cwd(), "sandboxes", "ctf-challenge", "tasks", taskId),
-    resolve(dirname(import.meta.filename || ""), "../../../sandboxes/ctf-challenge/tasks", taskId),
-    resolve(dirname(import.meta.filename || ""), "../../../../sandboxes/ctf-challenge/tasks", taskId),
-    "C:/Users/dines/OneDrive/Desktop/work1/tasks/" + taskId,
-    "C:/Users/dines/Desktop/work1/tasks/" + taskId,
-    join(userProfile, "OneDrive/Desktop/work1/tasks", taskId),
-    join(userProfile, "Desktop/work1/tasks", taskId),
   ].filter(Boolean);
 
   let foundFolder = null;
@@ -284,7 +266,6 @@ export async function extractTaskWorkspaceFiles(task, targetFlag) {
   if (files.length === 0) {
     const imageName =
       task?.image ||
-      BENCHMARK_IMAGES[taskId] ||
       (taskId ? `openrind-ctf-${taskId}:e2e` : null);
     if (imageName) {
       let tmpDir = null;
@@ -511,19 +492,17 @@ export async function buildHarborTaskFilesFromCtf(ctfTrajectory) {
     "",
   ].join("\n");
 
-  // Optional flag placement for path traversal / SSTI challenges that specifically read /flag.txt
-  const isDirectFileReadTask = taskId === "python-ssti" || taskId === "myflask-traversal";
-  const flagSetupLines = isDirectFileReadTask
-    ? [
-        "# Install server flag for path traversal / SSTI challenge",
-        `RUN printf '%s\\n' '${flag}' > /flag.txt && chmod 444 /flag.txt`,
-      ]
-    : [
-        "# Configure challenge server internal flag without leaking to workspace",
-        `RUN mkdir -p /opt/openrind-ctf/task \\`,
-        `    && printf '%s\\n' '${flag}' > /opt/openrind-ctf/task/flag.txt \\`,
-        `    && chmod 400 /opt/openrind-ctf/task/flag.txt`,
-      ];
+  // Install the server flag where challenge servers look for it: the absolute
+  // /flag.txt path used by path-traversal style challenges, and the runtime
+  // task directory used by the Openrind challenge image contract. Neither
+  // location is part of the /workspace deliverable.
+  const flagSetupLines = [
+    "# Install the server flag without leaking it to the workspace",
+    `RUN printf '%s\\n' '${flag}' > /flag.txt && chmod 444 /flag.txt \\`,
+    `    && mkdir -p /opt/openrind-ctf/task \\`,
+    `    && printf '%s\\n' '${flag}' > /opt/openrind-ctf/task/flag.txt \\`,
+    `    && chmod 400 /opt/openrind-ctf/task/flag.txt`,
+  ];
 
   // 3. environment/Dockerfile
   const dockerfile = [

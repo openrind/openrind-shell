@@ -43,7 +43,7 @@ import * as openshellCli from "./openshell/cli.mjs";
 import * as openrindShell from "./openshell/openrind-shell.mjs";
 import * as openrindCredentials from "./openshell/openrind-shell-credentials.mjs";
 import * as openrindPty from "./openshell/openrind-shell-pty.mjs";
-import { DemonstrationRecorder } from "./openshell/demonstration-recorder.mjs";
+import { DemonstrationRecorder, EVIDENCE_EVENT_KINDS } from "./openshell/demonstration-recorder.mjs";
 import {
   deriveOpenrindShellSandboxName,
   launchExternalTerminalToSandbox,
@@ -3684,15 +3684,24 @@ async function handleDesktopInvoke(event, command, ...args) {
                 defaultCollector = u.origin;
               } catch {}
             }
-            const targetSpansUrl = process.env.HALOOP_SPANS_URL?.trim() || (defaultCollector ? `${defaultCollector}/spans` : "");
-            const targetEventsUrl = process.env.HALOOP_COLLECTOR_URL?.trim() || (defaultCollector ? `${defaultCollector}/internal/capture/events` : "");
-            if (!targetSpansUrl) {
+            const collectorBase = (process.env.HALOOP_COLLECTOR_URL?.trim() || defaultCollector).replace(/\/+$/, "");
+            const targetSpansUrl = process.env.HALOOP_SPANS_URL?.trim() || (collectorBase ? `${collectorBase}/spans` : "");
+            const targetEventsUrl = collectorBase ? `${collectorBase}/internal/capture/events` : "";
+            if (!targetSpansUrl && !targetEventsUrl) {
               return;
             }
             const adminToken = (await openrindCredentials.getCredential("w8AdminToken").catch(() => null)) || process.env.ADMIN_TOKEN?.trim() || "";
-            const authHeaders = adminToken
+            const adminHeaders = adminToken
               ? { Authorization: `Bearer ${adminToken}`, "X-Admin-Token": adminToken }
               : {};
+            // /internal/capture/* authenticates a registered producer token
+            // (server-side W8_CAPTURE_PRODUCERS_JSON), not the admin token.
+            const producerToken = (await openrindCredentials.getCredential("w8CaptureProducerToken").catch(() => null)) || process.env.HALOOP_CAPTURE_PRODUCER_TOKEN?.trim() || "";
+
+            const logHttpFailure = async (label, res) => {
+              const snippet = await res.text().then((text) => text.slice(0, 300)).catch(() => "");
+              console.warn(`[DemonstrationRecorder] ${label}: HTTP ${res.status}${snippet ? ` — ${snippet}` : ""}`);
+            };
 
             const spansBatch = [];
             for (const record of bundle.records) {
@@ -3701,8 +3710,8 @@ async function handleDesktopInvoke(event, command, ...args) {
               const frameBefore = payload.frame_before || {};
               const artifactId = frameAfter.artifactId || payload.artifactId || frameBefore.artifactId || null;
               let artifactUrl = frameAfter.artifactUrl || payload.artifactUrl || frameBefore.artifactUrl || null;
-              if (artifactId && defaultCollector) {
-                artifactUrl = `${defaultCollector.replace(/\/+$/, "")}/artifacts/${artifactId}`;
+              if (artifactId && collectorBase) {
+                artifactUrl = `${collectorBase}/artifacts/${artifactId}`;
               }
 
               spansBatch.push({
@@ -3745,46 +3754,60 @@ async function handleDesktopInvoke(event, command, ...args) {
               });
             }
 
-            try {
-              await fetch(targetSpansUrl, {
-                method: "POST",
-                headers: { "content-type": "application/json", ...authHeaders },
-                body: JSON.stringify(spansBatch),
-              });
-            } catch (err) {
-              console.warn("[DemonstrationRecorder] Failed to post spans to Haloop:", err);
+            if (targetSpansUrl) {
+              try {
+                const res = await fetch(targetSpansUrl, {
+                  method: "POST",
+                  headers: { "content-type": "application/json", ...adminHeaders },
+                  body: JSON.stringify(spansBatch),
+                });
+                if (!res.ok) await logHttpFailure("Spans POST rejected", res);
+              } catch (err) {
+                console.warn("[DemonstrationRecorder] Failed to post spans to Haloop:", err);
+              }
             }
 
-            for (const record of bundle.records) {
-              const eventPayload = {
-                schema_version: 1,
-                project: bundle.project,
-                session_id: bundle.sessionId,
-                event_id: record.record_id || `evt-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
-                occurred_at: new Date(Number(BigInt(record.observed_at_unix_ns) / 1000000n)).toISOString(),
-                producer_version: "1.0.0",
-                data: record.payload || {},
-              };
-              try {
-                await fetch(targetEventsUrl, {
-                  method: "POST",
-                  headers: { "content-type": "application/json", ...authHeaders },
-                  body: JSON.stringify(eventPayload),
-                });
-              } catch (err) {
-                console.warn("[DemonstrationRecorder] Failed to post record to gateway events:", err);
+            // Evidence events: only record kinds with a valid schema payload.
+            // human_action and screen_observation already flow as AGENT spans
+            // above and are not valid /internal/capture/events types.
+            if (targetEventsUrl && !producerToken) {
+              console.warn("[DemonstrationRecorder] Skipping capture evidence events: no producer token configured. Set the w8CaptureProducerToken credential or HALOOP_CAPTURE_PRODUCER_TOKEN.");
+            } else if (targetEventsUrl) {
+              for (const record of bundle.records) {
+                if (!EVIDENCE_EVENT_KINDS.has(record?.kind)) continue;
+                const data = { ...(record.payload || {}) };
+                if (!data.type) data.type = record.kind;
+                const eventPayload = {
+                  schema_version: 1,
+                  project: bundle.project,
+                  session_id: bundle.sessionId,
+                  event_id: record.record_id || `evt-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+                  occurred_at: new Date(Number(BigInt(record.observed_at_unix_ns) / 1000000n)).toISOString(),
+                  producer_version: "1.0.0",
+                  data,
+                };
+                try {
+                  const res = await fetch(targetEventsUrl, {
+                    method: "POST",
+                    headers: { "content-type": "application/json", Authorization: `Bearer ${producerToken}` },
+                    body: JSON.stringify(eventPayload),
+                  });
+                  if (!res.ok) await logHttpFailure(`Evidence event ${data.type} (${eventPayload.event_id}) rejected`, res);
+                } catch (err) {
+                  console.warn(`[DemonstrationRecorder] Failed to post evidence event ${data.type}:`, err);
+                }
               }
             }
 
             // Also post the artifacts (images) directly to the collector /artifacts endpoint
-            if (bundle.artifacts && defaultCollector) {
-              const targetArtifactsUrl = process.env.HALOOP_ARTIFACTS_URL?.trim() || `${defaultCollector}/artifacts`;
+            if (bundle.artifacts && collectorBase) {
+              const targetArtifactsUrl = process.env.HALOOP_ARTIFACTS_URL?.trim() || `${collectorBase}/artifacts`;
               for (const [hash, item] of Object.entries(bundle.artifacts)) {
                 try {
                   const b64 = item.buffer ? item.buffer.toString("base64") : "";
-                  await fetch(targetArtifactsUrl, {
+                  const res = await fetch(targetArtifactsUrl, {
                     method: "POST",
-                    headers: { "content-type": "application/json", ...authHeaders },
+                    headers: { "content-type": "application/json", ...adminHeaders },
                     body: JSON.stringify({
                       artifact_id: item.originalName || hash,
                       sha256: hash,
@@ -3792,6 +3815,7 @@ async function handleDesktopInvoke(event, command, ...args) {
                       content_type: item.mediaType || "image/jpeg",
                     }),
                   });
+                  if (!res.ok) await logHttpFailure(`Artifact ${item.originalName || hash} POST rejected`, res);
                 } catch (err) {
                   console.warn("[DemonstrationRecorder] Failed to sync artifact:", err);
                 }
@@ -3840,6 +3864,13 @@ async function handleDesktopInvoke(event, command, ...args) {
         result,
       });
       return result;
+    }
+    case "demonstrationAttestOutcome": {
+      if (!demonstrationRecorder) {
+        throw new Error("No demonstration recorder initialized.");
+      }
+      const answer = args[0] || {};
+      return await demonstrationRecorder.attestOutcome({ completed: answer.completed === true });
     }
     case "demonstrationPause":
       demonstrationRecorder?.pause();

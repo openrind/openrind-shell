@@ -8,7 +8,7 @@ For a browser-only trial, start at [Real Linux Browser Test](#real-linux-browser
 For the experimental browser CTF test, see
 [Openrind CTF Runtime](openrind-desktop/packages/ctf-runtime/README.md).
 It uses separate owner, challenge, and Chromium pods. It does not need
-PostgreSQL, Haloop, Cyber-Zero, EnIGMA, or Claude. It is not a customer
+PostgreSQL, Haloop, or Claude. It is not a customer
 FUSE-owner test.
 For the customer Desktop path, use [Windows Desktop Source Setup](#windows-desktop-source-setup).
 
@@ -822,6 +822,51 @@ DATABASE_URL='postgresql://...' node test-memory-refresh.mjs
 
 `createOpenrindShell()` exposes `/db`, `/home/agent`, and `/tmp` through just-bash for
 custom agents. That path is independent of the primary kernel FUSE mount.
+
+## Verify The New Capture Paths
+
+Run these from the repository root. They need no Docker, no database, and no
+provider keys.
+
+```bash
+# VLA demonstration recorder: privacy controls, evidence envelope, attestation (11 tests)
+node --test openrind-desktop/apps/desktop/__tests__/openshell/demonstration-recorder.test.mjs
+
+# CTF runtime: synthetic task fixtures, proxy contract, judge isolation (15 tests)
+node --test openrind-desktop/packages/ctf-runtime/test/*.test.mjs
+
+# TypeScript: typecheck + structural lints + 165 vitest (incl. workspace-manifest)
+cd openeral-js && pnpm check
+```
+
+Syntax-check the edited runtime scripts:
+
+```bash
+node --check openrind-desktop/apps/desktop/electron/main.mjs
+node --check openrind-desktop/apps/desktop/electron/openshell/ctf-evidence.mjs
+node --check openrind-desktop/apps/desktop/electron/openshell/ctf-service.mjs
+node --check openrind-desktop/apps/desktop/electron/openshell/ctf-tasks.mjs
+node --check openrind-desktop/apps/desktop/electron/openshell/demonstration-recorder.mjs
+node --check openrind-desktop/apps/desktop/electron/openshell/fuse-sandbox.mjs
+node --check openrind-desktop/packages/ctf-runtime/src/agent.mjs
+node --check openrind-desktop/packages/ctf-runtime/src/tasks.mjs
+node --check sandboxes/openeral/haloop-agent-proxy.mjs
+```
+
+### Capture Configuration
+
+| Variable | Read by | Default | Purpose |
+|---|---|---|---|
+| `HALOOP_CAPTURE_PRODUCER_TOKEN` | `apps/desktop/electron/main.mjs` (VLA evidence bridge) | unset; evidence events are skipped with a warning | Producer bearer token for `/internal/capture/events`. The `w8CaptureProducerToken` credential (Settings → Environment) is the preferred source. |
+| `OPENRIND_CTF_COLLECTOR_URL` | `ctf-evidence.mjs`, `ctf-runtime/src/agent.mjs` | unset; falls back to `HALOOP_COLLECTOR_URL` / `W8_COLLECTOR_URL`, then derived from `HALOOP_GATEWAY_URL` (port 8788) | Collector base URL for CTF run evidence. |
+| `W8_CAPTURE_PRODUCER_TOKEN` | `ctf-evidence.mjs`, `ctf-runtime/src/agent.mjs`, `haloop-agent-proxy.mjs`, `openeral-js/src/workspace-manifest.ts` | unset; falls back to `HALOOP_CAPTURE_TOKEN`, then `ADMIN_TOKEN` | Producer bearer token for the evidence API. |
+| `HALOOP_CAPTURE_TOKEN` | same as `W8_CAPTURE_PRODUCER_TOKEN` | unset | Fallback producer token. |
+| `OPENRIND_CTF_PROJECT` / `OPENRIND_CAPTURE_PROJECT` | `ctf-evidence.mjs`, `ctf-runtime/src/agent.mjs`, `workspace-manifest.ts` | `openrind-ctf` (CTF) / `openrind-shell` (workspace) | Evidence project name. |
+| `OPENRIND_VLA_EXCLUDED_PROCESSES` | `demonstration-recorder.mjs` | unset; built-in password-manager list only | Comma-separated process names added to the capture exclusion list. Entries extend the defaults; they cannot remove them. |
+| `OPENRIND_VLA_MASK_REGIONS` | `demonstration-recorder.mjs` | unset; no masking | JSON array of `{x, y, w, h, display?}` rectangles blacked out before frame encode. |
+| `OPENRIND_IMAGE_DIGEST` | `haloop-agent-proxy.mjs` (process env or `session.env`) | unset; omitted from the manifest | Sandbox image identity. The Desktop launcher sets it at sandbox create. |
+| `OPENRIND_WORKSPACE_HASH` | `haloop-agent-proxy.mjs` (process env or `session.env`) | unset; omitted from the manifest | Workspace merkle root from `workspace-manifest`. Set by the `openrind-shell` CLI launch flow only. |
+| `OPENRIND_AGENT_HARNESS` | `haloop-agent-proxy.mjs` | `OPENRIND_SHELL_AGENT`, then `agent` | Harness name recorded in the proxy's `task.started`. |
 
 ## Custom PostgreSQL Hosts
 

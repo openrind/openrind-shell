@@ -15,6 +15,9 @@ if [ -f "$RUNTIME_DIR/session.env" ]; then
   # shellcheck disable=SC1090
   . "$RUNTIME_DIR/session.env"
 fi
+# Environment identity for Haloop session capture (see openrind-desktop-claude-launch.sh).
+export OPENRIND_IMAGE_DIGEST="${OPENRIND_IMAGE_DIGEST:-}"
+export OPENRIND_WORKSPACE_HASH="${OPENRIND_WORKSPACE_HASH:-}"
 export OPENRIND_SHELL_OPENCLAW_HOME="${OPENRIND_SHELL_OPENCLAW_HOME:-/sandbox/openclaw-home}"
 export HOME="$OPENRIND_SHELL_OPENCLAW_HOME"
 export NODE_NO_WARNINGS="${NODE_NO_WARNINGS:-1}"

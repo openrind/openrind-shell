@@ -54,27 +54,32 @@ The **helper** is the owner's local connection to that broker.
 
 ## Run Browser CTF Tasks
 
-The experimental CTF runtime has two self-contained challenge services. They
-run in separate OpenShell challenge sandboxes. A custom Openrind agent uses the
-unchanged `agent-browser` Kernel provider to drive Chromium in a browser pod.
-It records model requests, model actions, tool observations, and a separate flag
-judge result. It does not run Cyber-Zero, EnIGMA, Docker-in-Docker, or a simulated
-terminal.
+The experimental CTF runtime solves browser challenges from any tasks
+directory you select. It bundles no challenge tasks. Point the runtime at a
+directory that contains challenge folders. A directory is a challenge when it
+has a `challenge.json` or `task.toml`, a `flag.txt`, or a `chall/` or
+`challenge/` subdir with server code. Each challenge runs in its own OpenShell
+challenge sandbox. A custom Openrind agent uses the unchanged `agent-browser`
+Kernel provider to drive Chromium in a browser pod. It records model requests,
+model actions, tool observations, and a separate flag judge result. It does
+not run Docker-in-Docker or a simulated terminal.
 
-| Task ID | Challenge basis | Required browser work |
-|---|---|---|
-| `flag-command` | Cybench HTB `Flag Command` | Read same-origin page code and call its hidden command API. |
-| `glacier-exchange` | Cybench GLA `GlacierExchange` | Read supplied wallet code and exploit its signed numeric transfer. |
+The agent, image recipe, directory detection, unit tests, and live runner are
+in this checkout. A developer does not need a benchmark archive or a challenge
+collection checkout.
 
-The task implementations, agent, image recipe, unit tests, and live runner are
-in this checkout. A developer does not need a Cyber-Zero checkout, an EnIGMA
-image, Compose, or a benchmark archive.
+Start with the package unit test. It verifies task metadata handling, the
+challenge proxy, and the independent judge with synthetic fixtures and no
+model key. Then use the live runner only on Linux x64 with local Docker and
+`OPENROUTER_API_KEY`. Pass the challenge directory with `--ctf-task-dir=<path>`
+or `OPENRIND_CTF_TASK_DIR`. The runner builds the challenge image from that
+directory, then creates a temporary gateway, browser owner, browser pods, and
+a challenge pod. It does not use Desktop, PostgreSQL, or an existing customer
+sandbox.
 
-Start with the package unit test. It verifies both browser sites, the exploit
-path, and the independent judges without a model key. Then use the live runner
-only on Linux x64 with local Docker and `OPENROUTER_API_KEY`. It creates a
-temporary gateway, browser owner, browser pods, and challenge pods. It does not
-use Desktop, PostgreSQL, or an existing customer sandbox.
+Runs started from Openrind Desktop work the same way: select the tasks
+directory in the CTF sidebar, and each run writes its trajectory and event
+files to `<tasks-dir>/ctf-traces/`.
 
 Follow [Openrind CTF Runtime](./openrind-desktop/packages/ctf-runtime/README.md)
 for exact commands. Use the `openrind-ctf` skill when Codex runs this path.

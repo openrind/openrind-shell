@@ -501,6 +501,9 @@ SESSION_ENV="$OPENRIND_SHELL_RUNTIME_DIR/session.env"
   printf 'export OPENRIND_SHELL_WORKSPACE_ID='; shell_quote "$WORKSPACE_ID"; printf '\n'
   printf 'export OPENERAL_WORKSPACE_ID='; shell_quote "$WORKSPACE_ID"; printf '\n'
   printf 'export WORKSPACE_ID='; shell_quote "$WORKSPACE_ID"; printf '\n'
+  # Environment identity for Haloop session capture, when the launcher set it.
+  [ -z "${OPENRIND_IMAGE_DIGEST:-}" ] || printf 'export OPENRIND_IMAGE_DIGEST=%s\n' "$(shell_quote "$OPENRIND_IMAGE_DIGEST")"
+  [ -z "${OPENRIND_WORKSPACE_HASH:-}" ] || printf 'export OPENRIND_WORKSPACE_HASH=%s\n' "$(shell_quote "$OPENRIND_WORKSPACE_HASH")"
   printf 'export SHELL=/bin/bash\n'
   printf 'export AGENT_BROWSER_PROVIDER=kernel\n'
   printf 'export KERNEL_ENDPOINT=http://127.0.0.1:19300\n'

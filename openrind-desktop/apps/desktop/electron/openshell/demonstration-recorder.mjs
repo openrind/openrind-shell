@@ -1,6 +1,6 @@
 // Desktop Workflow Demonstration Recorder (VLA & Human Task Demonstration Capture)
 import electron from "electron";
-const { BrowserWindow, desktopCapturer, ipcMain, screen } = electron;
+const { BrowserWindow, desktopCapturer, ipcMain, nativeImage, screen } = electron;
 import { createHash } from "node:crypto";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
@@ -99,11 +99,16 @@ class DemonstrationProducer {
 }
 
 let uIOhook = null;
-try {
-  const mod = await import("uiohook-napi");
-  uIOhook = mod.uIOhook || mod.default || mod;
-} catch (e) {
-  // uiohook is optional in test environments or environments without display server
+// Skip the native hook under test: on hosts with X11 libraries the import
+// succeeds and the binding then kills the plain-Node test worker (no X
+// display), failing the whole file after every subtest has passed.
+if (!isTestEnv()) {
+  try {
+    const mod = await import("uiohook-napi");
+    uIOhook = mod.uIOhook || mod.default || mod;
+  } catch (e) {
+    // uiohook is optional in test environments or environments without display server
+  }
 }
 
 export function slugifyProject(title) {
@@ -112,12 +117,106 @@ export function slugifyProject(title) {
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9_.-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
+    .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, "")
     .slice(0, 120);
   return slug || "workflow-demo";
 }
 
-let cachedActiveWindow = { title: "Desktop Application", process: "DESKTOP" };
+// Capture ledger policy version stamped on every policy.recorded event.
+export const CAPTURE_POLICY_VERSION = "openrind-vla-capture/1";
+
+// Record kinds that map to valid /internal/capture/events evidence payloads
+// (schemas.py EventData union). human_action and screen_observation are NOT
+// evidence events; they reach the collector as AGENT spans only.
+export const EVIDENCE_EVENT_KINDS = new Set([
+  "task.started",
+  "episode.started",
+  "response.selected",
+  "tool.finished",
+  "artifact.recorded",
+  "outcome.observed",
+  "session.closed",
+  "policy.recorded",
+]);
+
+// Processes whose windows are never captured (no frames, no keystrokes).
+// Configured entries extend this default list; they cannot remove it.
+export const DEFAULT_EXCLUDED_PROCESSES = Object.freeze([
+  "keepass",
+  "keepassxc",
+  "bitwarden",
+  "1password",
+  "lastpass",
+  "dashlane",
+  "enpass",
+]);
+
+export function normalizeProcessName(name) {
+  return String(name ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\.exe$/, "");
+}
+
+export function parseExcludedProcesses(value) {
+  const entries = Array.isArray(value)
+    ? value
+    : String(value ?? "").split(",");
+  const normalized = entries
+    .map((entry) => normalizeProcessName(entry))
+    .filter((entry) => entry.length > 0);
+  return [...new Set(normalized)];
+}
+
+export function isExcludedProcess(processName, excludedProcesses) {
+  const normalized = normalizeProcessName(processName);
+  if (!normalized || !excludedProcesses) return false;
+  const set = excludedProcesses instanceof Set
+    ? excludedProcesses
+    : new Set(parseExcludedProcesses(excludedProcesses));
+  return set.has(normalized);
+}
+
+// Masked screen regions applied before JPEG encode. Accepts an array or a
+// JSON string of [{ x, y, w, h, display? }]. Coordinates are absolute screen
+// pixels; `display` limits a region to one display id ("*" or omitted = all).
+export function parseMaskRegions(value) {
+  let raw = value;
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    try {
+      raw = JSON.parse(trimmed);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(raw)) return [];
+  const regions = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const x = Number(entry.x);
+    const y = Number(entry.y);
+    const w = Number(entry.w);
+    const h = Number(entry.h);
+    if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) continue;
+    regions.push({
+      x,
+      y,
+      w,
+      h,
+      ...(entry.display !== undefined && entry.display !== null
+        ? { display: String(entry.display) }
+        : {}),
+    });
+  }
+  return regions;
+}
+
+// `trusted` is false until a window poll succeeds. A failed poll keeps the
+// last title but marks it untrusted so the recorder masks conservatively
+// instead of assuming the stale title is safe.
+let cachedActiveWindow = { title: "Desktop Application", process: "DESKTOP", trusted: false };
 let windowPollTimer = null;
 
 function isTestEnv() {
@@ -138,9 +237,14 @@ function startWindowPolling() {
           cachedActiveWindow = {
             title: parsed.title || "Desktop",
             process: (parsed.process || "unknown").toUpperCase(),
+            trusted: true,
           };
+        } else {
+          cachedActiveWindow = { ...cachedActiveWindow, trusted: false };
         }
-      } catch {}
+      } catch {
+        cachedActiveWindow = { ...cachedActiveWindow, trusted: false };
+      }
     }
   };
 
@@ -157,7 +261,7 @@ function stopWindowPolling() {
 
 export function getActiveWindow() {
   if (isTestEnv()) {
-    return { title: "Test Window", process: "TEST" };
+    return { title: "Test Window", process: "TEST", trusted: true };
   }
   return cachedActiveWindow;
 }
@@ -166,17 +270,22 @@ export class DemonstrationRecorder {
   constructor({
     getMainWindow,
     postCollectorEvents,
+    getActiveWindow: getActiveWindowOverride = undefined,
   }) {
     this.getMainWindow = getMainWindow;
     this.postCollectorEvents = postCollectorEvents;
+    this.getActiveWindowFn = typeof getActiveWindowOverride === "function"
+      ? getActiveWindowOverride
+      : getActiveWindow;
     this.activeSession = null;
     this.floatingWindow = null;
     this.captureTimer = null;
     this.lastFrameHash = null;
     this.isCapturing = false;
+    this.pendingAttestation = null;
   }
 
-  async start({ taskTitle, domain = "desktop_gui", captureIntervalMs = 1500, scrubPii = true, collectorUrl = "", adminToken = "" }) {
+  async start({ taskTitle, domain = "desktop_gui", captureIntervalMs = 1500, scrubPii = true, collectorUrl = "", adminToken = "", trainingConsent = false, excludedProcesses = null, maskRegions = null }) {
     if (this.activeSession) {
       throw new Error("A demonstration recording is already in progress.");
     }
@@ -202,6 +311,19 @@ export class DemonstrationRecorder {
       producerInstanceId: "desktop-host",
     });
 
+    // A new session invalidates any unanswered attestation from a prior run.
+    this.pendingAttestation = null;
+
+    const excludedProcessSet = new Set([
+      ...DEFAULT_EXCLUDED_PROCESSES,
+      ...parseExcludedProcesses(process.env.OPENRIND_VLA_EXCLUDED_PROCESSES),
+      ...parseExcludedProcesses(excludedProcesses),
+    ]);
+    const maskRegionList = [
+      ...parseMaskRegions(process.env.OPENRIND_VLA_MASK_REGIONS),
+      ...parseMaskRegions(maskRegions),
+    ];
+
     this.activeSession = {
       taskTitle: cleanTitle,
       projectId,
@@ -217,12 +339,19 @@ export class DemonstrationRecorder {
       adminToken: (adminToken || "").trim(),
       isPaused: false,
       captureIntervalMs: Math.max(500, captureIntervalMs),
+      trainingConsent: trainingConsent === true,
+      excludedProcesses: excludedProcessSet,
+      maskRegions: maskRegionList,
+      captureGaps: [],
+      maskingLogged: false,
+      excludedSkips: 0,
     };
 
     // Emit task.started host event
     producer.emit({
       kind: "task.started",
       payload: {
+        type: "task.started",
         task_id: projectId,
         attempt_id: runId,
         domain: "other",
@@ -232,6 +361,17 @@ export class DemonstrationRecorder {
           version: "1.0.0",
           protocol: "human_vla_demonstration",
         },
+      },
+    });
+
+    // Record the capture consent policy for this session. Training use is
+    // opt-in: without explicit consent the session is marked opted out.
+    producer.emit({
+      kind: "policy.recorded",
+      payload: {
+        type: "policy.recorded",
+        policy_version: CAPTURE_POLICY_VERSION,
+        training_opt_out: !this.activeSession.trainingConsent,
       },
     });
 
@@ -250,7 +390,9 @@ export class DemonstrationRecorder {
     startWindowPolling();
 
     // Baseline initial snapshot frame
-    void this.captureSnapshot({ trigger: "initial" });
+    if (!isTestEnv()) {
+      void this.captureSnapshot({ trigger: "initial" }).catch(() => {});
+    }
 
     return {
       started: true,
@@ -286,6 +428,7 @@ export class DemonstrationRecorder {
 
     this.onMouseDown = (e) => {
       if (!this.activeSession || this.activeSession.isPaused) return;
+      if (this._isExcludedWindow(this.getActiveWindowFn())) return;
       const buttonName = e.button === 1 ? "left" : e.button === 2 ? "right" : "middle";
       this.recordInputEvent({
         type: "mouse_click",
@@ -299,6 +442,7 @@ export class DemonstrationRecorder {
 
     this.onMouseWheel = (e) => {
       if (!this.activeSession || this.activeSession.isPaused) return;
+      if (this._isExcludedWindow(this.getActiveWindowFn())) return;
       this.recordInputEvent({
         type: "mouse_scroll",
         x: e.x,
@@ -338,6 +482,13 @@ export class DemonstrationRecorder {
 
     this.onKeyDown = (e) => {
       if (!this.activeSession || this.activeSession.isPaused) return;
+
+      // Never buffer keystrokes typed into an excluded window (password
+      // managers). Drop anything already buffered for the same reason.
+      if (this._isExcludedWindow(this.getActiveWindowFn())) {
+        this.textBuffer = "";
+        return;
+      }
 
       const specialKey = keycodeMap[e.keycode];
 
@@ -388,6 +539,10 @@ export class DemonstrationRecorder {
 
     this.onKeyTyped = (e) => {
       if (!this.activeSession || this.activeSession.isPaused) return;
+      if (this._isExcludedWindow(this.getActiveWindowFn())) {
+        this.textBuffer = "";
+        return;
+      }
       const rawCode = e.keychar || e.rawcode || 0;
       if (rawCode >= 32) {
         const char = String.fromCharCode(rawCode);
@@ -422,6 +577,56 @@ export class DemonstrationRecorder {
     } catch {}
   }
 
+  _isExcludedWindow(activeWindow) {
+    if (!this.activeSession) return false;
+    return isExcludedProcess(activeWindow?.process, this.activeSession.excludedProcesses);
+  }
+
+  _noteCaptureGap(gap) {
+    const gaps = this.activeSession?.captureGaps;
+    if (!gaps || gaps.includes(gap) || gaps.length >= 1000) return;
+    gaps.push(gap);
+  }
+
+  _noteMaskingActivated(reason) {
+    if (!this.activeSession || this.activeSession.maskingLogged) return;
+    this.activeSession.maskingLogged = true;
+    console.warn(`[DemonstrationRecorder] Secure-input masking activated for this session (${reason}). Typed text is masked.`);
+  }
+
+  // Black out configured regions of a captured frame before JPEG encode.
+  // Region coordinates are absolute screen pixels; they are clipped to the
+  // captured display and scaled to the thumbnail size.
+  _applyMaskRegions(image, display) {
+    const regions = this.activeSession?.maskRegions || [];
+    if (regions.length === 0) return image;
+    const size = image.getSize();
+    const bounds = display?.bounds || { x: 0, y: 0, width: size.width, height: size.height };
+    const applicable = regions.filter((region) =>
+      !region.display || region.display === "*" || String(region.display) === String(display?.id)
+    );
+    if (applicable.length === 0) return image;
+    const scaleX = bounds.width > 0 ? size.width / bounds.width : 1;
+    const scaleY = bounds.height > 0 ? size.height / bounds.height : 1;
+    const bitmap = image.toBitmap();
+    for (const region of applicable) {
+      const x0 = Math.max(0, Math.round((region.x - (bounds.x || 0)) * scaleX));
+      const y0 = Math.max(0, Math.round((region.y - (bounds.y || 0)) * scaleY));
+      const x1 = Math.min(size.width, Math.round((region.x - (bounds.x || 0) + region.w) * scaleX));
+      const y1 = Math.min(size.height, Math.round((region.y - (bounds.y || 0) + region.h) * scaleY));
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
+          const offset = (y * size.width + x) * 4;
+          bitmap[offset] = 0;
+          bitmap[offset + 1] = 0;
+          bitmap[offset + 2] = 0;
+          bitmap[offset + 3] = 255;
+        }
+      }
+    }
+    return nativeImage.createFromBitmap(bitmap, { width: size.width, height: size.height });
+  }
+
   _startCaptureLoop() {
     this.captureTimer = setInterval(async () => {
       if (!this.activeSession || this.activeSession.isPaused || this.isCapturing) {
@@ -439,7 +644,21 @@ export class DemonstrationRecorder {
   }
 
   async captureSnapshot({ trigger = "manual", action = null } = {}) {
-    if (!this.activeSession || isTestEnv() || !desktopCapturer?.getSources) return null;
+    if (!this.activeSession) return null;
+
+    // Excluded windows (password managers) are never captured: no frames.
+    let activeWindow = null;
+    try {
+      activeWindow = await this.getActiveWindowFn();
+    } catch {}
+    if (!this.activeSession) return null;
+    if (this._isExcludedWindow(activeWindow)) {
+      this.activeSession.excludedSkips++;
+      this._noteCaptureGap(`excluded_window:${normalizeProcessName(activeWindow?.process)}`);
+      return null;
+    }
+
+    if (isTestEnv() || !desktopCapturer?.getSources) return null;
 
     let cursor = { x: 0, y: 0 };
     let currentDisplay = null;
@@ -472,8 +691,19 @@ export class DemonstrationRecorder {
       if (matched) targetSource = matched;
     }
 
-    const image = targetSource.thumbnail;
+    let image = targetSource.thumbnail;
     if (!image || image.isEmpty()) return null;
+
+    // Mask configured screen regions before encoding. If masking fails the
+    // frame is dropped rather than uploaded unmasked.
+    if (this.activeSession.maskRegions.length > 0) {
+      try {
+        image = this._applyMaskRegions(image, currentDisplay);
+      } catch (err) {
+        console.error("[DemonstrationRecorder] Frame region masking failed; dropping frame:", err);
+        return null;
+      }
+    }
 
     // Convert to WebP or JPEG buffer
     const buffer = image.toJPEG(85);
@@ -513,15 +743,21 @@ export class DemonstrationRecorder {
           content: base64Data,
           content_type: "image/jpeg",
         }),
+      }).then(async (res) => {
+        if (!res.ok) {
+          const snippet = await res.text().then((t) => t.slice(0, 300)).catch(() => "");
+          console.warn(`[DemonstrationRecorder] Frame artifact POST failed: HTTP ${res.status}${snippet ? ` — ${snippet}` : ""}`);
+        }
       }).catch((err) => {
         console.warn("[DemonstrationRecorder] Failed to stream frame artifact:", err?.message || err);
       });
     }
 
-    let activeWin = await getActiveWindow();
+    let activeWin = activeWindow;
     if (this.activeSession.scrubPii && activeWin?.title) {
       activeWin = { ...activeWin, title: scrubPiiText(activeWin.title) };
     }
+    const titleTrusted = activeWin?.trusted !== false;
 
     const displayBounds = currentDisplay?.bounds || { x: 0, y: 0, width: targetWidth, height: targetHeight };
     const framePayload = {
@@ -542,7 +778,7 @@ export class DemonstrationRecorder {
         relativeX: Math.max(0, Math.min(displayBounds.width, cursor.x - displayBounds.x)),
         relativeY: Math.max(0, Math.min(displayBounds.height, cursor.y - displayBounds.y)),
       },
-      activeWindow: activeWin,
+      activeWindow: { ...activeWin, titleTrusted },
       trigger,
       action: action || null,
     };
@@ -581,10 +817,25 @@ export class DemonstrationRecorder {
   async _recordInputEventInternal(actionData) {
     if (!this.activeSession || this.activeSession.isPaused) return null;
 
-    let activeWin = await getActiveWindow();
+    let activeWin = null;
+    try {
+      activeWin = await this.getActiveWindowFn();
+    } catch {}
+    if (!this.activeSession || this.activeSession.isPaused) return null;
+    // Excluded windows (password managers) never produce input events.
+    if (this._isExcludedWindow(activeWin)) {
+      this.activeSession.excludedSkips++;
+      this._noteCaptureGap(`excluded_window:${normalizeProcessName(activeWin?.process)}`);
+      return null;
+    }
     if (this.activeSession.scrubPii && activeWin?.title) {
       activeWin = { ...activeWin, title: scrubPiiText(activeWin.title) };
     }
+    // The window title is untrusted input. When title polling failed, the
+    // cached title may be stale, so treat the interval as potentially
+    // sensitive and mask typed text instead of assuming the title is safe.
+    const titleTrusted = activeWin?.trusted !== false;
+    activeWin = { ...activeWin, titleTrusted };
     const actionTimestamp = actionData.timestamp || Date.now();
     const frameBefore = this.activeSession.lastFrame || null;
 
@@ -595,7 +846,12 @@ export class DemonstrationRecorder {
     if (this.activeSession.scrubPii && typeof scrubbedAction.text === "string") {
       const winLower = (activeWin?.title || "").toLowerCase();
       const isAuthContext = /password|passcode|passphrase|log[ -]?in|sign[ -]?in|\bpin\b|credentials|sudo|authenticate/i.test(winLower);
-      if (isAuthContext || scrubbedAction.isPassword) {
+      if (isAuthContext || scrubbedAction.isPassword || !titleTrusted) {
+        if (!titleTrusted && !isAuthContext && !scrubbedAction.isPassword) {
+          this._noteMaskingActivated("window title unavailable");
+        } else {
+          this._noteMaskingActivated("sensitive window context");
+        }
         scrubbedAction.text = "••••••••";
       } else {
         scrubbedAction.text = scrubPiiText(scrubbedAction.text);
@@ -642,7 +898,7 @@ export class DemonstrationRecorder {
       observedAtUnixNs: String(BigInt(Date.now()) * 1000000n),
       payload: {
         ...scrubbedAction,
-        activeWindow: activeWin,
+        activeWindow: { ...activeWin, titleTrusted },
         timestamp: actionTimestamp,
         frame_before: frameBefore,
         frame_after: frameAfter,
@@ -703,12 +959,21 @@ export class DemonstrationRecorder {
         records = producer.getRecords();
         const finalActionCount = records.filter((r) => r.kind === "human_action").length;
         if (!producer.isSealed) {
+          // Host evidence events emitted before the closure; the closure
+          // itself is excluded from the inventory per the capture contract.
+          const hostEventIds = records
+            .filter((r) => EVIDENCE_EVENT_KINDS.has(r.kind) && r.kind !== "session.closed")
+            .map((r) => r.record_id);
           producer.emit({
             kind: "session.closed",
             payload: {
+              type: "session.closed",
               reason: "completed",
-              total_frames: session.framesCount,
-              total_actions: finalActionCount,
+              // A human demonstration makes no model requests, so the
+              // expected request inventory is honestly empty.
+              expected_request_ids: [],
+              expected_event_ids: hostEventIds,
+              capture_gaps: [...session.captureGaps],
             },
           });
           sealResult = producer.seal({ complete: true });
@@ -768,6 +1033,25 @@ export class DemonstrationRecorder {
         }
       }
 
+      // Context for the end-of-session user attestation (outcome.observed).
+      // The subject hash commits to the sealed session inventory so the
+      // verdict names exactly what was recorded.
+      const subjectSha256 = createHash("sha256").update(JSON.stringify({
+        session_id: session.sessionId,
+        trace_id: session.traceId,
+        record_ids: records.map((r) => r.record_id),
+        artifact_hashes: Object.keys(sealResult?.artifacts || {}).sort(),
+      })).digest("hex");
+      this.pendingAttestation = {
+        project: session.projectId,
+        sessionId: session.sessionId,
+        traceId: session.traceId,
+        taskId: session.projectId,
+        attemptId: session.runId,
+        runId: session.runId,
+        subjectSha256,
+      };
+
       this.lastCompletedResult = {
         success: true,
         projectId: session.projectId,
@@ -787,6 +1071,79 @@ export class DemonstrationRecorder {
     })();
 
     return this.stoppingPromise;
+  }
+
+  /**
+   * Record the user's end-of-session attestation as capture evidence:
+   * an artifact.recorded holding the attestation, then an outcome.observed
+   * that references it. One-shot per session; a skip emits nothing and the
+   * session keeps its downstream default. Never blocks stopping — stop()
+   * has already completed when this runs.
+   */
+  async attestOutcome({ completed }) {
+    const pending = this.pendingAttestation;
+    if (!pending) {
+      return { emitted: false, reason: "no_pending_attestation" };
+    }
+    this.pendingAttestation = null;
+    if (!this.postCollectorEvents) {
+      return { emitted: false, reason: "no_collector" };
+    }
+
+    const answeredAt = new Date().toISOString();
+    const observedAtUnixNs = String(BigInt(Date.now()) * 1000000n);
+    const attestationId = `att-${pending.runId}`;
+    const attestationContent = JSON.stringify({
+      prompt: "Did you complete what you intended?",
+      answer: completed ? "yes" : "no",
+      answered_at: answeredAt,
+      session_id: pending.sessionId,
+      task_id: pending.taskId,
+      attempt_id: pending.attemptId,
+    });
+
+    const records = [
+      {
+        record_id: attestationId,
+        observed_at_unix_ns: observedAtUnixNs,
+        kind: "artifact.recorded",
+        payload: {
+          type: "artifact.recorded",
+          artifact_id: attestationId,
+          kind: "other",
+          content: attestationContent,
+          content_type: "application/json",
+          boundary: "observation",
+        },
+      },
+      {
+        record_id: `out-${pending.runId}`,
+        observed_at_unix_ns: observedAtUnixNs,
+        kind: "outcome.observed",
+        payload: {
+          type: "outcome.observed",
+          task_id: pending.taskId,
+          attempt_id: pending.attemptId,
+          // The host relays the demonstrator's own report; the capture API
+          // maps self_report outcomes to the host producer role.
+          origin: "self_report",
+          verdict: completed ? "pass" : "fail",
+          subject_sha256: pending.subjectSha256,
+          verifier_name: "desktop-user-attestation",
+          verifier_version: "1.0.0",
+          evidence_artifact_ids: [attestationId],
+        },
+      },
+    ];
+
+    await this.postCollectorEvents({
+      project: pending.project,
+      sessionId: pending.sessionId,
+      traceId: pending.traceId,
+      records,
+      artifacts: {},
+    });
+    return { emitted: true, verdict: completed ? "pass" : "fail" };
   }
 
   async _createFloatingWindow() {

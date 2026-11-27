@@ -43,6 +43,17 @@ import {
   workspaceIdForMarker,
   writeInitMarker,
 } from './init-marker.js';
+import { createPool } from './db/pool.js';
+import type { DbPool } from './db/pool.js';
+import {
+  diffWorkspaces,
+  emitWorkspacePatch,
+  parseSnapshot,
+  resolveWorkspaceCaptureConfig,
+  serializeSnapshot,
+  snapshotWorkspace,
+} from './workspace-manifest.js';
+import type { WorkspaceSnapshot } from './workspace-manifest.js';
 
 const OPENSHELL_BIN = process.env.OPENSHELL_BIN?.trim() || 'openshell';
 const OPENSHELL_GLOBAL_ARGS = process.env.OPENSHELL_GATEWAY_ENDPOINT?.trim()
@@ -261,6 +272,8 @@ function printHelp(): void {
   openrind-shell presign                     Show the current gateway presign
   openrind-shell presign renew               Create and store a gateway presign
   openrind-shell init [--ensure]             Initialize or verify sandbox state
+  openrind-shell workspace-manifest snapshot|diff
+                                             Capture FUSE workspace change manifests
   openrind-shell stats [options]             Show API usage statistics
   openrind-shell analyze [options]           Analyze session history
   openrind-shell apply [options]             Apply optimization suggestions
@@ -795,6 +808,29 @@ async function launchViaSandbox(
     sandboxArgs.push('--upload', `${dbUploadPath}:/sandbox/db-url`);
   }
 
+  // Workspace change capture (FUSE/DB manifest). The start snapshot's merkle
+  // root is exported into the sandbox so the in-sandbox proxy can stamp it as
+  // a session attribute; the end-of-session diff is emitted after Claude exits.
+  let workspacePool: DbPool | null = null;
+  let workspaceStartSnapshot: WorkspaceSnapshot | null = null;
+  if (fuseRuntime && dbUrl) {
+    try {
+      workspacePool = createPool(dbUrl);
+      workspaceStartSnapshot = await snapshotWorkspace(workspacePool, workspaceId, { includeContent: true });
+      sandboxArgs.push('--env', `OPENRIND_WORKSPACE_HASH=${workspaceStartSnapshot.rootHash}`);
+      process.stderr.write(
+        `\x1b[2mopenrind-shell: workspace start hash ${workspaceStartSnapshot.rootHash.slice(0, 16)} (${workspaceStartSnapshot.entries.length} files)\x1b[0m\n`,
+      );
+    } catch (err) {
+      process.stderr.write(`\x1b[33mwarning: workspace start snapshot failed: ${(err as Error).message}\x1b[0m\n`);
+      workspaceStartSnapshot = null;
+      if (workspacePool) {
+        await workspacePool.end().catch(() => {});
+        workspacePool = null;
+      }
+    }
+  }
+
   if (storedPresign) {
     const presignUploadPath = join(tmpdir(), `openrind-shell-presign-${process.pid}-${Date.now()}.json`);
     writeFileSync(
@@ -920,7 +956,137 @@ async function launchViaSandbox(
     }
   });
 
+  // Session end: diff the workspace against the start snapshot and emit the
+  // patch as a model_patch artifact. Best-effort: capture failures warn but
+  // never change the session's exit code.
+  if (workspacePool) {
+    try {
+      if (workspaceStartSnapshot) {
+        const endSnapshot = await snapshotWorkspace(workspacePool, workspaceId, { includeContent: true });
+        const diff = diffWorkspaces(workspaceStartSnapshot, endSnapshot);
+        const changed = diff.added.length + diff.modified.length + diff.deleted.length;
+        if (changed > 0) {
+          const capture = resolveWorkspaceCaptureConfig(process.env);
+          if (capture.enabled) {
+            const result = await emitWorkspacePatch({ ...capture, sessionId: workspaceId, diff });
+            process.stderr.write(
+              `\x1b[2mopenrind-shell: workspace patch ${result.artifactId} emitted (${diff.added.length} added, ${diff.modified.length} modified, ${diff.deleted.length} deleted)\x1b[0m\n`,
+            );
+          } else {
+            process.stderr.write(
+              `\x1b[2mopenrind-shell: workspace changed (${changed} files); collector not configured, patch not emitted\x1b[0m\n`,
+            );
+          }
+        }
+      }
+    } catch (err) {
+      process.stderr.write(`\x1b[33mwarning: workspace end-of-session diff failed: ${(err as Error).message}\x1b[0m\n`);
+    } finally {
+      await workspacePool.end().catch(() => {});
+    }
+  }
+
   if (exitCode !== 0) process.exitCode = exitCode;
+}
+
+// ---------------------------------------------------------------------------
+// workspace-manifest commands
+// ---------------------------------------------------------------------------
+
+function workspaceManifestDir(): string {
+  return join(homedir(), '.config', 'openrind-shell', 'workspace-manifest');
+}
+
+/**
+ * Manual workspace change capture for sessions that did not go through the
+ * launch flow: `snapshot` stores a start manifest, `diff` compares the current
+ * volume against it and can emit the patch to the collector.
+ */
+async function cmdWorkspaceManifest(args: string[]): Promise<void> {
+  const sub = args[0];
+  let workspaceId = renamedEnv('OPENRIND_SHELL_WORKSPACE_ID', 'OPENERAL_WORKSPACE_ID')
+    || DEFAULT_WORKSPACE_ID;
+  let session = '';
+  let emit = false;
+  let outPath = '';
+  for (let i = 1; i < args.length; i++) {
+    if ((args[i] === '--workspace' || args[i] === '-w') && args[i + 1]) {
+      workspaceId = args[++i];
+    } else if (args[i] === '--session' && args[i + 1]) {
+      session = args[++i];
+    } else if (args[i] === '--emit') {
+      emit = true;
+    } else if (args[i] === '--out' && args[i + 1]) {
+      outPath = args[++i];
+    }
+  }
+  workspaceId = workspaceId.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, '').replace(/-{2,}/g, '-');
+  if (workspaceId.length === 0) workspaceId = DEFAULT_WORKSPACE_ID;
+  const sessionId = session || workspaceId;
+
+  if (sub !== 'snapshot' && sub !== 'diff') {
+    process.stderr.write(
+      'Usage: openrind-shell workspace-manifest <snapshot|diff> [--workspace <id>] [--session <id>] [--emit] [--out <path>]\n',
+    );
+    process.exit(1);
+  }
+
+  const dbUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
+  if (!dbUrl) {
+    process.stderr.write('\x1b[31merror: DATABASE_URL is required for workspace-manifest\x1b[0m\n');
+    process.exit(1);
+  }
+
+  const pool = createPool(dbUrl);
+  try {
+    if (sub === 'snapshot') {
+      const snapshot = await snapshotWorkspace(pool, workspaceId, { includeContent: true });
+      mkdirSync(workspaceManifestDir(), { recursive: true, mode: 0o700 });
+      const file = join(workspaceManifestDir(), `${sessionId}.json`);
+      writeFileSync(file, serializeSnapshot(snapshot), { mode: 0o600 });
+      try { chmodSync(file, 0o600); } catch {}
+      console.log(`workspace ${workspaceId}: ${snapshot.entries.length} files, root ${snapshot.rootHash}`);
+      console.log(`snapshot stored in ${file}`);
+      return;
+    }
+
+    const file = join(workspaceManifestDir(), `${sessionId}.json`);
+    if (!existsSync(file)) {
+      process.stderr.write(
+        `\x1b[31merror: no stored start snapshot for session ${sessionId} (run: openrind-shell workspace-manifest snapshot --session ${sessionId})\x1b[0m\n`,
+      );
+      process.exit(1);
+    }
+    const startSnapshot = parseSnapshot(readFileSync(file, 'utf8'));
+    const endSnapshot = await snapshotWorkspace(pool, workspaceId, { includeContent: true });
+    const diff = diffWorkspaces(startSnapshot, endSnapshot);
+    console.log(
+      `workspace ${workspaceId}: ${diff.added.length} added, ${diff.modified.length} modified, ${diff.deleted.length} deleted`,
+    );
+    console.log(`start ${diff.startRootHash}`);
+    console.log(`end   ${diff.endRootHash}`);
+    if (outPath) {
+      writeFileSync(outPath, diff.patchText, { mode: 0o600 });
+      console.log(`patch written to ${outPath}`);
+    } else if (diff.patchText) {
+      console.log(`\n${diff.patchText}`);
+    }
+    if (emit) {
+      const capture = resolveWorkspaceCaptureConfig(process.env);
+      if (!capture.enabled) {
+        process.stderr.write(
+          '\x1b[31merror: collector URL/producer token not configured (HALOOP_COLLECTOR_URL, W8_CAPTURE_PRODUCER_TOKEN)\x1b[0m\n',
+        );
+        process.exit(1);
+      }
+      const result = await emitWorkspacePatch({ ...capture, sessionId, diff });
+      console.log(
+        `emitted ${result.artifactId} (sha256 ${result.sha256}${result.inlineEvent ? '' : ', inline event skipped: patch over 1 MiB'})`,
+      );
+    }
+  } finally {
+    await pool.end().catch(() => {});
+  }
 }
 
 export async function main() {
@@ -963,6 +1129,16 @@ export async function main() {
       await cmdInit(ownArgs.slice(1));
     } catch (err: any) {
       process.stderr.write(`\x1b[31mopenrind-shell: init failed: ${err?.message || err}\x1b[0m\n`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (ownArgs[0] === 'workspace-manifest') {
+    try {
+      await cmdWorkspaceManifest(ownArgs.slice(1));
+    } catch (err: any) {
+      process.stderr.write(`\x1b[31mopenrind-shell: workspace-manifest failed: ${err?.message || err}\x1b[0m\n`);
       process.exit(1);
     }
     return;

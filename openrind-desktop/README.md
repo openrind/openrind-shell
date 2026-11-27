@@ -89,8 +89,17 @@ Access the real-time telemetry and performance dashboard under **Settings -> Obs
 Capture high-quality human demonstrations for Vision-Language-Action (VLA) and agent task imitation:
 - **Global Input Hooks:** Captures global mouse clicks, wheel scrolls, and typed text.
 - **Automatic PII Redaction:** Sanitizes passwords, API keys, tokens, and emails from typed text and active window titles.
+- **Password Manager Exclusion:** Windows owned by password managers (KeePass, Bitwarden, 1Password, and similar) are never captured. No frames and no keystrokes. Add process names with `OPENRIND_VLA_EXCLUDED_PROCESSES` (comma-separated).
+- **Untrusted Title Masking:** When the active-window title cannot be read, typed text is masked for that interval. The title is treated as untrusted input, never as proof of a safe context.
+- **Region Masking:** Set `OPENRIND_VLA_MASK_REGIONS` to a JSON array of `{x, y, w, h, display?}` rectangles. Matching screen regions are blacked out before frames are encoded.
+- **Consent and Evidence:** Each session records a capture policy event. Training use is opt-in via the record dialog. Evidence events (`task.started`, `policy.recorded`, `session.closed`, `outcome.observed`) go to `/internal/capture/events` with a producer bearer token (`HALOOP_CAPTURE_PRODUCER_TOKEN` or the `w8CaptureProducerToken` credential), not the admin token.
+- **Outcome Attestation:** After a session stops, the app asks once whether you completed what you intended. Yes or No is reported as an outcome. Skip reports nothing.
 - **Multi-Monitor Display Resolution:** Detects the monitor nearest to the cursor, captures the matching screen source, and records normalized relative coordinates `(relativeX, relativeY)` alongside global coordinates.
 - **Strict Frame Alignment:** Enforces a 100ms settling delay so OS repaints finish, guaranteeing `before_ts < action_ts < settled_after_ts`.
+
+## CTF Run Evidence
+
+CTF runs keep writing local traces under `ctf-traces/`. When a collector URL and a producer token are configured (`OPENRIND_CTF_COLLECTOR_URL` or `HALOOP_COLLECTOR_URL`, plus `W8_CAPTURE_PRODUCER_TOKEN`), each run also emits evidence to the collector: `task.started`, the trajectory and the challenge-event log as content-addressed artifacts, and an `outcome.observed` verdict from the challenge judge (origin `verifier`). Failed and stopped runs emit too. Emission is best-effort and never fails a run. Trajectories carry an `integrity` self-check (run pairing, monotonic steps, real timestamps) so mismatched trace files are flagged.
 
 ## Quick Start
 

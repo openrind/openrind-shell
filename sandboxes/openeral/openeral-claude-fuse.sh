@@ -7,6 +7,10 @@ if [ -f "$RUNTIME_DIR/session.env" ]; then
   . "$RUNTIME_DIR/session.env"
 fi
 
+# Environment identity for Haloop session capture (see openrind-desktop-claude-launch.sh).
+export OPENRIND_IMAGE_DIGEST="${OPENRIND_IMAGE_DIGEST:-}"
+export OPENRIND_WORKSPACE_HASH="${OPENRIND_WORKSPACE_HASH:-}"
+
 export HOME="${OPENRIND_SHELL_CLAUDE_HOME:-/sandbox/claude-home}"
 export PATH="$HOME/.local/bin:${PATH:-/usr/local/bin:/usr/bin:/bin}"
 export OPENRIND_SHELL_HOME=/sandbox/work

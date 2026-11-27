@@ -1,3 +1,5 @@
+> **SUPERSEDED — historical record (2026-11-27).** This analysis is pre-remediation. The gaps it documents (0 ms spans, stale frames, error masking, missing workspace diffs, unverified provenance, plaintext leakage) were addressed in the trace-maturity remediation. Current status and honest scores live in the workspace-level `TRACE-CAPTURE-MATURITY-AUDIT.md` (§9–§10) and in this repo's `ARCHITECTURE.md` / `BUILD.md`. Keep this file only as the record of the pre-fix state.
+
 I will analyze the codebase and traces for `test-capture-13` (screen capture traces) and `[audit5cld, audit5cdx, audit5opnclw]` (sandbox agent traces) to verify the 98.5% data capture maturity claim. I am delegating the specialized investigation into two parallel subagents: one for screen capture / multimodal traces and one for sandbox agent traces.
 
 ## Executive Verdict: **Claim Rejected (98.5% Maturity is Not Reached)**
