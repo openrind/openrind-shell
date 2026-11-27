@@ -6,6 +6,7 @@ on:
       - nemo
       - browser-pods
       - audit
+      - new/audit
     paths:
       - 'Cargo.lock'
       - 'Cargo.toml'
