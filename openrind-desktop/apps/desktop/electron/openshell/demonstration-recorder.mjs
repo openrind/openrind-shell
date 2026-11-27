@@ -820,6 +820,7 @@ export class DemonstrationRecorder {
     // cached title may be stale, so treat the interval as potentially
     // sensitive and mask typed text instead of assuming the title is safe.
     const titleTrusted = activeWin?.trusted !== false;
+    activeWin = { ...activeWin, titleTrusted };
     const actionTimestamp = actionData.timestamp || Date.now();
     const frameBefore = this.activeSession.lastFrame || null;
 

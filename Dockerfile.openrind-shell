@@ -68,7 +68,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 RUN /usr/bin/python3.12 -m venv --copies /opt/openrind-openhands \
-    && /opt/openrind-openhands/bin/python3.12 -m pip install --no-cache-dir "openhands==1.16.0" \
+    && /opt/openrind-openhands/bin/python3.12 -m pip install --no-cache-dir "openhands==1.16.0" "authlib" \
     && /opt/openrind-openhands/bin/python3.12 -I -c 'import sys; from openhands_cli.entrypoint import main; sys.argv = ["openhands", "--help"]; main()'
 
 COPY openrind-desktop/packages/browser-pods/packaging/ /opt/openrind/browser/
