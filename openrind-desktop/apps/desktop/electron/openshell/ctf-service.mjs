@@ -107,17 +107,6 @@ export function normalizeModelName(rawModel, isAnthropic = false) {
   return m || DEFAULT_CTF_MODEL;
 }
 
-// Built-in benchmark images mapped to their task ID
-const BENCHMARK_IMAGES = {
-  "flag-command": "openrind-ctf-flag-command:e2e",
-  "glacier-exchange": "openrind-ctf-glacier-exchange:e2e",
-  "amoebananas": "openrind-ctf-amoebananas:e2e",
-  "client-secrets": "openrind-ctf-client-secrets:e2e",
-  "cookie-clicker": "openrind-ctf-cookie-clicker:e2e",
-  "myflask-traversal": "openrind-ctf-myflask-traversal:e2e",
-  "python-ssti": "openrind-ctf-python-ssti:e2e",
-};
-
 async function runDocker(args, options = {}) {
   const { timeout = 60_000, onOutput } = options;
   return new Promise((resolve) => {
@@ -460,7 +449,7 @@ async function scanDirectoryForChallenges(rootDir, maxDepth = 4) {
               folderPath: taskFolder,
               backendPort: Number(item.internal_port || item.backendPort || known?.backendPort || 8080),
               sitePath: known?.sitePath || "/",
-              image: known?.image || BENCHMARK_IMAGES[id] || `openrind-ctf-${id}:local`,
+              image: known?.image || `openrind-ctf-${id}:local`,
               flag: item.flag || known?.flag || "",
               isCustom: true,
               browserRules: known?.browserRules || [
@@ -489,7 +478,7 @@ async function scanDirectoryForChallenges(rootDir, maxDepth = 4) {
     const folderBase = basename(currentDir);
     const id = folderBase.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
 
-    // 1. Direct match with a known benchmark challenge (e.g. client-secrets, cookie-clicker, flag-command)
+    // 1. Direct match with a previously registered task for this directory id
     const known = knownTaskMap.get(id);
     if (known) {
       let flag = known.flag || "";
@@ -516,7 +505,7 @@ async function scanDirectoryForChallenges(rootDir, maxDepth = 4) {
         category: known.category || "web",
         backendPort: known.backendPort || 8080,
         sitePath: known.sitePath || "/",
-        image: known.image || BENCHMARK_IMAGES[known.id] || `openrind-ctf-${known.id}:local`,
+        image: known.image || `openrind-ctf-${known.id}:local`,
         flag: flag || known.flag || "",
         folderPath: currentDir,
         isCustom: true,
@@ -1071,7 +1060,7 @@ export function createCtfService() {
       const results = [];
 
       for (const t of targetTasks) {
-        const imageName = t.image || BENCHMARK_IMAGES[t.id] || `openrind-ctf-${t.id}:local`;
+        const imageName = t.image || `openrind-ctf-${t.id}:local`;
         const traceFile = await findTraceFile(t.id);
         let solved = false;
         let traceSummary = null;
@@ -1118,7 +1107,6 @@ export function createCtfService() {
       if (!task) return false;
       const candidates = [
         task.image,
-        BENCHMARK_IMAGES[task.id],
         `openrind-ctf-${task.id}:e2e`,
         `openrind-ctf-${task.id}:local`,
       ].filter(Boolean);
@@ -1427,7 +1415,6 @@ export function createCtfService() {
       let effectiveImage = task.image;
       const candidates = [
         task.image,
-        BENCHMARK_IMAGES[task.id],
         `openrind-ctf-${task.id}:e2e`,
         `openrind-ctf-${task.id}:local`,
       ].filter(Boolean);
@@ -1458,9 +1445,12 @@ export function createCtfService() {
       onStatus?.({ phase: "starting", message: `Starting container on port ${hostPort}...` });
 
       let runRes;
-      const isBenchmarkImage = imageName.includes(":e2e") || (BENCHMARK_IMAGES[task.id] && imageName === BENCHMARK_IMAGES[task.id]);
-      if (isBenchmarkImage) {
-        // Benchmark challenge container: run with challenge.mjs reverse proxy & judge
+      // Challenge-proxy images (`:e2e`, built from sandboxes/ctf-challenge/Dockerfile)
+      // run challenge.mjs with its reverse proxy and judge. Other images run the
+      // raw app and the run falls back to direct flag comparison.
+      const usesChallengeProxy = imageName.includes(":e2e");
+      if (usesChallengeProxy) {
+        // Challenge proxy container: run with challenge.mjs reverse proxy & judge
         runRes = await runDocker([
           "run",
           "-d",
@@ -1897,8 +1887,7 @@ Return only valid JSON matching the schema. Keep thoughts concise (1-2 sentences
           }
 
           let flagToSubmit = (modelAction.flag || targetPath || "").trim();
-          const flagMatch = flagToSubmit.match(/(?:gctf|HTB|utflag|SEKAI|picoCTF)\{[^}]+\}/i) ||
-                            flagToSubmit.match(/pseudopods_are_da_bomb|all_javascript_is_open/i);
+          const flagMatch = flagToSubmit.match(/(?:gctf|HTB|utflag|SEKAI|picoCTF)\{[^}]+\}/i);
           if (flagMatch) {
             flagToSubmit = flagMatch[0];
             tool = "submit";

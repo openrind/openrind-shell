@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { connect } from 'node:net';
 import { mkdir, open, readFile } from 'node:fs/promises';
 import { createChallengeServer } from '../src/challenge-server.mjs';
-import { createTask } from '../src/tasks.mjs';
+import { createTask, registerDynamicTask } from '../src/tasks.mjs';
 
 const args = new Map();
 for (let index = 2; index < process.argv.length; index += 2) {
@@ -11,7 +11,28 @@ for (let index = 2; index < process.argv.length; index += 2) {
   if (!name?.startsWith('--') || !value || args.has(name)) throw new Error('INVALID_ARGUMENTS');
   args.set(name, value);
 }
-const task = createTask(args.get('--task'));
+
+// Images built from an arbitrary task directory carry no bundled registry.
+// Resolve the task from metadata baked into the image at build time.
+async function resolveTask(id) {
+  try { return createTask(id); } catch {}
+  try {
+    const parsed = JSON.parse(await readFile('/opt/openrind-ctf/task/challenge.json', 'utf8'));
+    const task = registerDynamicTask({ ...parsed, id: parsed.id || id });
+    if (task.id !== id) throw new Error('TASK_ID_MISMATCH');
+    return task;
+  } catch (error) {
+    if (error.message === 'TASK_ID_MISMATCH') throw error;
+  }
+  // Minimal convention: chall/server.py plus flag.txt needs no metadata file.
+  try {
+    await readFile('/opt/openrind-ctf/task/flag.txt', 'utf8');
+    return registerDynamicTask({ id });
+  } catch {}
+  throw new Error('UNKNOWN_TASK');
+}
+
+const task = await resolveTask(args.get('--task'));
 const token = args.get('--judge-token');
 const port = Number(args.get('--port') ?? '19401');
 const upstreamPort = task.backendPort;

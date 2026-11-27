@@ -8,7 +8,7 @@ For a browser-only trial, start at [Real Linux Browser Test](#real-linux-browser
 For the experimental browser CTF test, see
 [Openrind CTF Runtime](openrind-desktop/packages/ctf-runtime/README.md).
 It uses separate owner, challenge, and Chromium pods. It does not need
-PostgreSQL, Haloop, Cyber-Zero, EnIGMA, or Claude. It is not a customer
+PostgreSQL, Haloop, or Claude. It is not a customer
 FUSE-owner test.
 For the customer Desktop path, use [Windows Desktop Source Setup](#windows-desktop-source-setup).
 
@@ -832,7 +832,7 @@ provider keys.
 # VLA demonstration recorder: privacy controls, evidence envelope, attestation (11 tests)
 node --test openrind-desktop/apps/desktop/__tests__/openshell/demonstration-recorder.test.mjs
 
-# CTF runtime: task definitions, proxy contract, judge isolation (14 tests)
+# CTF runtime: synthetic task fixtures, proxy contract, judge isolation (15 tests)
 node --test openrind-desktop/packages/ctf-runtime/test/*.test.mjs
 
 # TypeScript: typecheck + structural lints + 165 vitest (incl. workspace-manifest)

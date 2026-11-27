@@ -3,16 +3,17 @@
 import assert from 'node:assert/strict';
 import { spawn, execFile } from 'node:child_process';
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
-import { mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { cp, mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { browserPodBinding } from '../../../../apps/desktop/electron/openshell/browser-binding.mjs';
 import { startWidgetFixture } from './argide/widget-host.mjs';
-import { createTask, publicTask } from '../../../ctf-runtime/src/tasks.mjs';
+import { createTask, publicTask, registerDynamicTask } from '../../../ctf-runtime/src/tasks.mjs';
 
 const exec = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../..');
@@ -23,27 +24,17 @@ const podImage = process.env.BROWSER_POD_IMAGE || 'openrind-browser-pod:e2e';
 const testHyperbrowser = process.argv.includes('--hyperbrowser');
 const testArgide = process.argv.includes('--argide');
 const testWidget = process.argv.includes('--argide-widget');
-const testCtf = process.argv.includes('--ctf');
-const ctfTaskArg = process.argv.find(arg => arg.startsWith('--task=') || arg.startsWith('--ctf-task='));
-const selectedTask = ctfTaskArg ? ctfTaskArg.split('=')[1] : null;
-const ctfTasks = selectedTask ? [selectedTask] : [
-  'flag-command',
-  'glacier-exchange',
-  'amoebananas',
-  'client-secrets',
-  'cookie-clicker',
-  'myflask-traversal',
-  'python-ssti',
-];
-const ctfImages = {
-  'flag-command': process.env.CTF_FLAG_COMMAND_IMAGE || 'openrind-ctf-flag-command:e2e',
-  'glacier-exchange': process.env.CTF_GLACIER_EXCHANGE_IMAGE || 'openrind-ctf-glacier-exchange:e2e',
-  'amoebananas': process.env.CTF_AMOEBANANAS_IMAGE || 'openrind-ctf-amoebananas:e2e',
-  'client-secrets': process.env.CTF_CLIENT_SECRETS_IMAGE || 'openrind-ctf-client-secrets:e2e',
-  'cookie-clicker': process.env.CTF_COOKIE_CLICKER_IMAGE || 'openrind-ctf-cookie-clicker:e2e',
-  'myflask-traversal': process.env.CTF_MYFLASK_TRAVERSAL_IMAGE || 'openrind-ctf-myflask-traversal:e2e',
-  'python-ssti': process.env.CTF_PYTHON_SSTI_IMAGE || 'openrind-ctf-python-ssti:e2e',
-};
+const ctfTaskDirArg = process.argv.find(arg => arg.startsWith('--ctf-task-dir='));
+const ctfTaskDir = ctfTaskDirArg
+  ? resolve(ctfTaskDirArg.slice('--ctf-task-dir='.length))
+  : (process.env.OPENRIND_CTF_TASK_DIR ? resolve(process.env.OPENRIND_CTF_TASK_DIR) : null);
+// There are no bundled CTF tasks. The --ctf path runs one user-supplied
+// challenge directory and skips with a clear message when none is provided.
+let testCtf = process.argv.includes('--ctf');
+if (testCtf && !ctfTaskDir) {
+  console.log('SKIP: --ctf needs a challenge directory. Pass --ctf-task-dir=<path> or set OPENRIND_CTF_TASK_DIR. Running the standard browser fixture instead.');
+  testCtf = false;
+}
 const ctfModel = process.env.OPENRIND_CTF_MODEL || 'openai/gpt-4o-mini';
 const state = await mkdtemp(join(tmpdir(), 'openrind-browser-live-'));
 const tag = randomBytes(4).toString('hex');
@@ -104,6 +95,100 @@ async function stopChild(child) {
   const exit = new Promise(resolve => child.once('exit', resolve));
   await Promise.race([exit, sleep(20_000, undefined, { ref: false })]);
   if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await exit; }
+}
+
+// Load task metadata from a user-supplied challenge directory. The directory
+// conventions match the Desktop service: challenge.json or task.toml for
+// metadata, flag.txt (or chall|challenge/flag.txt) for the judge, and a
+// chall|challenge subdir (or a root server file) for the app entrypoint.
+async function loadCtfTask(dir) {
+  if (!existsSync(dir)) throw new Error(`CTF task directory does not exist: ${dir}`);
+  const id = basename(dir).toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  let title = basename(dir).split(/[-_]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  let description = '';
+  let flag = '';
+  let backendPort = 8080;
+  let entrypoint = '';
+  const read = async path => { try { return await readFile(path, 'utf8'); } catch { return ''; } };
+  if (existsSync(join(dir, 'challenge.json'))) {
+    try {
+      const data = JSON.parse(await read(join(dir, 'challenge.json')));
+      title = data.name || data.title || title;
+      description = data.description || description;
+      flag = data.flag || flag;
+      backendPort = Number(data.internal_port || data.backendPort || backendPort);
+      entrypoint = data.entrypoint || entrypoint;
+    } catch {}
+  } else if (existsSync(join(dir, 'task.toml'))) {
+    const toml = await read(join(dir, 'task.toml'));
+    const nameMatch = toml.match(/name\s*=\s*["']([^"']+)["']/);
+    if (nameMatch) title = nameMatch[1].split('/').pop();
+    const descMatch = toml.match(/description\s*=\s*["']([^"']+)["']/);
+    if (descMatch) description = descMatch[1];
+    const portMatch = toml.match(/web_service_port\s*=\s*(\d+)/);
+    if (portMatch) backendPort = Number(portMatch[1]);
+  }
+  if (!description) {
+    for (const name of ['DESCRIPTION.md', 'instruction.md', 'README.md']) {
+      description = (await read(join(dir, name))).trim();
+      if (description) break;
+    }
+  }
+  if (!flag) {
+    for (const candidate of ['flag.txt', 'flag', 'chall/flag.txt', 'challenge/flag.txt']) {
+      flag = (await read(join(dir, candidate))).trim();
+      if (flag) break;
+    }
+  }
+  if (!entrypoint) {
+    for (const rel of ['chall/server.py', 'challenge/server.py', 'challenge/run.py', 'chall/run.py',
+      'chall/app.py', 'challenge/app.py', 'server.py', 'app.py', 'run.py', 'main.py']) {
+      if (existsSync(join(dir, rel))) { entrypoint = `/opt/openrind-ctf/task/${rel}`; break; }
+    }
+  }
+  if (!flag) throw new Error(`CTF task directory ${dir} has no flag.txt; the challenge judge needs one.`);
+  if (!entrypoint) {
+    throw new Error(`CTF task directory ${dir} has no server entrypoint (looked for chall/server.py, challenge/run.py, server.py, app.py, run.py, main.py).`);
+  }
+  return registerDynamicTask({
+    id, title, description, backendPort, entrypoint,
+    workingDirectory: entrypoint.slice(0, entrypoint.lastIndexOf('/')),
+    flag,
+  });
+}
+
+// Stage a build context (runtime + generic Dockerfile + the task directory)
+// and build the challenge image. The staged task copy always carries a
+// challenge.json so the in-image challenge.mjs can resolve the task without
+// the removed bundled registry.
+async function buildCtfImage(task, dir) {
+  const contextDir = join(state, 'ctf-build-context');
+  await mkdir(join(contextDir, 'runtime', 'bin'), { recursive: true });
+  const runtimeDir = join(root, 'openrind-desktop/packages/ctf-runtime');
+  await cp(join(runtimeDir, 'package.json'), join(contextDir, 'runtime/package.json'));
+  await cp(join(runtimeDir, 'src'), join(contextDir, 'runtime/src'), { recursive: true });
+  await cp(join(runtimeDir, 'bin/challenge.mjs'), join(contextDir, 'runtime/bin/challenge.mjs'));
+  await cp(join(root, 'sandboxes/ctf-challenge/Dockerfile'), join(contextDir, 'Dockerfile'));
+  await cp(dir, join(contextDir, 'task'), { recursive: true });
+  let existing = {};
+  try { existing = JSON.parse(await readFile(join(contextDir, 'task/challenge.json'), 'utf8')); } catch {}
+  await writeFile(join(contextDir, 'task/challenge.json'), JSON.stringify({
+    ...existing,
+    id: task.id,
+    name: task.title,
+    description: task.description,
+    backendPort: task.backendPort,
+    entrypoint: task.entrypoint,
+    workingDirectory: task.workingDirectory,
+  }, null, 2));
+  if (!existsSync(join(contextDir, 'task/flag.txt'))) {
+    await writeFile(join(contextDir, 'task/flag.txt'), `${task.flag}\n`);
+  }
+  const image = `openrind-ctf-${task.id}:e2e`;
+  await run('docker', ['build', '--pull=false', '-f', join(contextDir, 'Dockerfile'),
+    '--build-arg', 'RUNTIME_DIR=runtime', '--build-arg', 'TASK_DIR=task',
+    '-t', image, contextDir], { timeout: 600_000 });
+  return image;
 }
 
 async function startCtfChallenge({ id, index, bridge, image }) {
@@ -210,9 +295,12 @@ try {
     assert.ok(process.env.ARGIDE_WIDGET_BUNDLE, 'ARGIDE_WIDGET_BUNDLE is required');
     assert.ok(process.env.ARGIDE_BACKEND_URL, 'ARGIDE_BACKEND_URL is required');
   }
+  let ctfTask = null;
+  let ctfImage = null;
   if (testCtf) {
     assert.ok(process.env.OPENROUTER_API_KEY?.trim(), '--ctf requires OPENROUTER_API_KEY');
-    for (const id of ctfTasks) await run('docker', ['image', 'inspect', ctfImages[id]]);
+    ctfTask = await loadCtfTask(ctfTaskDir);
+    ctfImage = await buildCtfImage(ctfTask, ctfTaskDir);
   }
   await run('docker', ['image', 'inspect', ownerImage]);
   const podDigest = await run('docker', ['image', 'inspect', '--format', '{{.Id}}', podImage]);
@@ -279,10 +367,8 @@ supervisor_bin = "${binaryDir}/openshell-sandbox"
   gatewayReady = true;
   pass('isolated vendored gateway ready');
   if (testCtf) {
-    for (const [index, id] of ctfTasks.entries()) {
-      await startCtfChallenge({ id, index, bridge, image: ctfImages[id] });
-    }
-    pass(`${ctfTasks.length} upstream benchmark Flask challenge service(s) ready in separate sandbox(es)`);
+    await startCtfChallenge({ id: ctfTask.id, index: 0, bridge, image: ctfImage });
+    pass(`challenge service for ${ctfTask.title} ready in a separate sandbox`);
   }
   binding = browserPodBinding({ endpoint: 'http://host.openshell.internal:19301', bridgeAddress: bridge, bindingId: tag });
   await writeFile(join(state, 'profile.json'), JSON.stringify(binding.profile), { mode: 0o600 });

@@ -99,11 +99,16 @@ class DemonstrationProducer {
 }
 
 let uIOhook = null;
-try {
-  const mod = await import("uiohook-napi");
-  uIOhook = mod.uIOhook || mod.default || mod;
-} catch (e) {
-  // uiohook is optional in test environments or environments without display server
+// Skip the native hook under test: on hosts with X11 libraries the import
+// succeeds and the binding then kills the plain-Node test worker (no X
+// display), failing the whole file after every subtest has passed.
+if (!isTestEnv()) {
+  try {
+    const mod = await import("uiohook-napi");
+    uIOhook = mod.uIOhook || mod.default || mod;
+  } catch (e) {
+    // uiohook is optional in test environments or environments without display server
+  }
 }
 
 export function slugifyProject(title) {
